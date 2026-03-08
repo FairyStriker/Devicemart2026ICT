@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#ffffff">
+<title>SPCC Simulator</title>
+<link rel="manifest" href="manifest.json">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body,#root{height:100%;overflow:hidden}
+body{font-family:'Pretendard Variable','Noto Sans KR',-apple-system,BlinkMacSystemFont,sans-serif;
+  padding-bottom:env(safe-area-inset-bottom,0)}
+#root{width:100%;position:fixed;top:0;left:0;right:0;bottom:0}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useCallback} = React;
+
+
+/* ══════════ SENSOR LAYOUT ══════════
+  [헤드레스트-등판 사이] VL53L8CX 1개 (8x8 ToF, 거북목 3D 측정)
+    → neckDist: 거리(0=밀착,1=멀리), neckAngle: 좌우 기울기(-1~1)
+  [등판 상단] MPU6050 1개 (의자 기울기 측정)
+    → tiltX: 전후 기울기(-1=앞,+1=뒤), tiltY: 좌우 기울기(-1=왼,+1=오른)
+  [등받이 3x4 행렬]
+    Col1(압력)  Col2(VL53L0X)  Col3(압력)
+    BL1         ToF1            BR1       ← Row1 (상부)
+    BL2         ToF2            BR2       ← Row2
+    BL3         ToF3            BR3       ← Row3
+    BL4         ToF4            BR4       ← Row4 (하부/요추)
+    → VL53L0X 4개: 허리 척추 굽힘만 측정
+  [좌석 2x2]
+    SBL(뒤왼)  SBR(뒤오른)
+    SFL(앞왼)  SFR(앞오른)
+  총: 압력 12개 + VL53L0X 4개 + VL53L8CX 1개 + MPU6050 1개
+══════════════════════════════════════ */
+const ZONES = [
+  {id:"BL1",label:"등 좌상",part:"back",row:0,col:"L"},
+  {id:"BL2",label:"등 좌중상",part:"back",row:1,col:"L"},
+  {id:"BL3",label:"등 좌중하",part:"back",row:2,col:"L"},
+  {id:"BL4",label:"등 좌하",part:"back",row:3,col:"L"},
+  {id:"BR1",label:"등 우상",part:"back",row:0,col:"R"},
+  {id:"BR2",label:"등 우중상",part:"back",row:1,col:"R"},
+  {id:"BR3",label:"등 우중하",part:"back",row:2,col:"R"},
+  {id:"BR4",label:"등 우하",part:"back",row:3,col:"R"},
+  {id:"SBL",label:"좌석 뒤왼",part:"seat",row:0,col:"L"},
+  {id:"SBR",label:"좌석 뒤오른",part:"seat",row:0,col:"R"},
+  {id:"SFL",label:"좌석 앞왼",part:"seat",row:1,col:"L"},
+  {id:"SFR",label:"좌석 앞오른",part:"seat",row:1,col:"R"},
+];
+const TOF_LABELS=["요추 ToF 1","요추 ToF 2","요추 ToF 3","요추 ToF 4"];
+const POS={
+  GOOD:{label:"정자세",color:"#16a34a"},
+  TURTLE_NECK:{label:"거북목",color:"#9333ea"},
+  LUMBAR_FWD:{label:"허리 굽힘",color:"#be185d"},
+  LEAN_LEFT:{label:"왼쪽 기울임",color:"#dc2626"},
+  LEAN_RIGHT:{label:"오른쪽 기울임",color:"#dc2626"},
+  LEAN_FORWARD:{label:"앞으로 기울임",color:"#ea580c"},
+  SLOUCH:{label:"구부정한 자세",color:"#ea580c"},
+  CROSSED_LEFT:{label:"왼쪽 다리 꼬기",color:"#dc2626"},
+  CROSSED_RIGHT:{label:"오른쪽 다리 꼬기",color:"#dc2626"},
+  HALF_LYING:{label:"걸터앉아 반누움",color:"#0369a1"},
+};
+const WT={back:1.5,seat:1.0};
+const lc=d=>d<.25?"#22c55e":d<.55?"#f59e0b":"#ef4444";
+const sc=s=>s>=75?"#22c55e":s>=50?"#f59e0b":"#ef4444";
+const cl=(v,a,b)=>Math.max(a,Math.min(b,v));
+const topP=arr=>{if(!arr||!arr.length)return"GOOD";const f={};arr.forEach(x=>{if(x)f[x]=(f[x]||0)+1;});const e=Object.entries(f);return e.length?e.sort((a,b)=>b[1]-a[1])[0][0]:"GOOD";};
+const avgOf=arr=>arr&&arr.length?arr.reduce((s,x)=>s+(x||0),0)/arr.length:0;
+const fmtNum=n=>n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(1)+"K":String(n);
+const safeFlat=blocks=>{if(!blocks||!Array.isArray(blocks))return[];const out=[];const walk=items=>{if(!items||!Array.isArray(items))return;for(const c of items){if(!c)continue;if(c.children&&Array.isArray(c.children))walk(c.children);else out.push(c);}};walk(blocks);return out;};
+function postureStats(block){
+  if(!block)return[];
+  const flat=safeFlat(block.children?[block]:[]);
+  if(!flat.length)return[];
+  const f={};flat.forEach(m=>{if(m&&m.posture)m.posture.split("+").forEach(p=>{if(p&&p!=="GOOD")f[p]=(f[p]||0)+1;});});const total=flat.length;
+  if(!Object.keys(f).length)return[{posture:"GOOD",count:total,pct:100}];
+  return Object.entries(f).sort((a,b)=>b[1]-a[1]).map(([p,cnt])=>({posture:p,count:cnt,pct:total>0?Math.round(cnt/total*100):0}));
+}
+function detect(z,tof,neck,mpu){
+  const L=[z[0],z[1],z[2],z[3]],R=[z[4],z[5],z[6],z[7]];
+  const seat=[z[8],z[9],z[10],z[11]];
+  const avgL=avgOf(L),avgR=avgOf(R),backDiff=avgL-avgR;
+  const seatL=(seat[0]+seat[2])/2,seatR=(seat[1]+seat[3])/2,seatDiff=seatL-seatR;
+  const seatFront=(seat[2]+seat[3])/2,seatBack=(seat[0]+seat[1])/2;
+  const lmTof=avgOf(tof);const avgBack=avgOf([...L,...R]);
+  const nd=neck?.dist||0;const yBias=mpu?.tiltY||0;
+  const flags=[];
+  if(avgBack>.6&&seatFront>seatBack+.08&&seatBack<.42&&lmTof>.3)flags.push("HALF_LYING");
+  if(nd>.35)flags.push("TURTLE_NECK");
+  if(lmTof>.4)flags.push("LUMBAR_FWD");
+  if(lmTof>.35&&avgBack<.35)flags.push("SLOUCH");
+  if(lmTof>.35&&seatFront>seatBack+.15&&avgBack<.4)flags.push("LEAN_FORWARD");
+  if(backDiff+yBias*.1>.15&&seatDiff>.1)flags.push("LEAN_LEFT");
+  if(backDiff+yBias*.1<-.15&&seatDiff<-.1)flags.push("LEAN_RIGHT");
+  if(Math.abs(seatDiff)>.25)flags.push(seatDiff>0?"CROSSED_LEFT":"CROSSED_RIGHT");
+  return flags.length>0?flags.join("+"):"GOOD";
+}
+function calcScore(z,tof,neck,mpu,cal,calTof,calNeck,calMpu,pen,sens){
+  let tw=0,td=0;
+  const devs=z.map((v,i)=>{const d=Math.abs(v-cal[i])*sens;const w=WT[ZONES[i].part];tw+=w;td+=d*w;return cl(d,0,1);});
+  const tofDevs=tof.map((v,i)=>{const d=Math.abs(v-calTof[i])*sens;tw+=2.0;td+=d*2.0;return cl(d,0,1);});
+  const neckDev=cl(Math.abs((neck?.dist||0)-(calNeck?.dist||0))*sens,0,1);
+  tw+=2.5;td+=neckDev*2.5;
+  const tiltDev=Math.abs((mpu?.tiltX||0)-(calMpu?.tiltX||0));
+  const tiltPenalty=cl(tiltDev*.15,0,.1);
+  const raw=cl((100*(1-(tw>0?td/tw:0)))/pen,0,100);
+  return{score:cl(raw-tiltPenalty*100,0,100),devs,tofDevs,neckDev,tiltDev};
+}
+const DELTAS={
+  TURTLE_NECK:{z:[-.15,-.1,0,0, -.15,-.1,0,0, 0,0,0,0],tof:[0,0,0,0],neck:{dist:.5,angle:0},mpu:{tiltX:0,tiltY:0}},
+  LUMBAR_FWD:{z:[0,0,-.1,-.2, 0,0,-.1,-.2, 0,0,.05,.05],tof:[.4,.45,.5,.55],neck:{dist:.1,angle:0},mpu:{tiltX:0,tiltY:0}},
+  LEAN_LEFT:{z:[.2,.22,.18,.15, -.2,-.22,-.18,-.15, .15,-.15,.1,-.2],tof:[.05,.08,.1,.07],neck:{dist:0,angle:-.3},mpu:{tiltX:0,tiltY:-.15}},
+  LEAN_RIGHT:{z:[-.2,-.22,-.18,-.15, .2,.22,.18,.15, -.15,.15,-.2,.1],tof:[.05,.08,.1,.07],neck:{dist:0,angle:.3},mpu:{tiltX:0,tiltY:.15}},
+  LEAN_FORWARD:{z:[-.2,-.22,-.25,-.28, -.2,-.22,-.25,-.28, -.15,-.15,.2,.22],tof:[.3,.4,.5,.55],neck:{dist:.2,angle:0},mpu:{tiltX:-.1,tiltY:0}},
+  SLOUCH:{z:[-.1,-.15,-.2,-.25, -.1,-.15,-.2,-.25, 0,0,.05,.05],tof:[.1,.15,.4,.55],neck:{dist:.25,angle:0},mpu:{tiltX:-.05,tiltY:0}},
+  CROSSED_LEFT:{z:[0,0,0,0, 0,0,0,0, .2,-.15,.25,-.25],tof:[.03,.05,.08,.05],neck:{dist:0,angle:0},mpu:{tiltX:0,tiltY:-.05}},
+  CROSSED_RIGHT:{z:[0,0,0,0, 0,0,0,0, -.15,.2,-.25,.25],tof:[.03,.05,.08,.05],neck:{dist:0,angle:0},mpu:{tiltX:0,tiltY:.05}},
+  HALF_LYING:{z:[.2,.25,.28,.3, .2,.25,.28,.3, -.15,-.15,.18,.2],tof:[-.05,-.02,.3,.4],neck:{dist:-.05,angle:0},mpu:{tiltX:.2,tiltY:0}},
+};
+function genSensorData(flags){
+  const z=ZONES.map(()=>.5+(Math.random()-.5)*.04);
+  const t=[.08,.08,.1,.12].map(v=>v+(Math.random()-.5)*.03);
+  let neck={dist:.08+(Math.random()-.5)*.04,angle:(Math.random()-.5)*.05};
+  let mpu={tiltX:(Math.random()-.5)*.03,tiltY:(Math.random()-.5)*.03};
+  for(const flag of flags){const d=DELTAS[flag];if(!d)continue;
+    for(let i=0;i<12;i++)z[i]+=d.z[i]||0;for(let i=0;i<4;i++)t[i]+=d.tof[i]||0;
+    if(d.neck){neck.dist+=d.neck.dist||0;neck.angle+=d.neck.angle||0;}
+    if(d.mpu){mpu.tiltX+=d.mpu.tiltX||0;mpu.tiltY+=d.mpu.tiltY||0;}}
+  return{z:z.map(v=>cl(v+(Math.random()-.5)*.02,0,1)),tof:t.map(v=>cl(v+(Math.random()-.5)*.02,0,1)),
+    neck:{dist:cl(neck.dist,0,1),angle:cl(neck.angle,-1,1)},mpu:{tiltX:cl(mpu.tiltX,-1,1),tiltY:cl(mpu.tiltY,-1,1)}};
+}
+const mkProf=i=>({slot:i,name:`프로필 ${i+1}`,calibration:null,calTof:null,calNeck:null,calMpu:null,sensitivity:1.0,alertDelay:60});
+/* ═══ CHAIR TOP VIEW ═══ */
+function ChairView({devs,tofDevs,neck,neckDev,mpu}){
+  const c=i=>lc(devs[i]||0);
+  const o=i=>cl(.5+(devs[i]||0)*.5,.5,1);
+  const tc=i=>{const d=tofDevs?.[i]||0;return d<.25?"#22c55e":d<.55?"#f59e0b":"#ef4444";};
+  const nd=neck?.dist||0,nc=lc(neckDev||0);
+  return <svg viewBox="0 0 260 410" style={{width:"100%",maxWidth:250,display:"block",margin:"0 auto"}}>
+    {/* VL53L8CX (헤드레스트-등판 사이) */}
+    <rect x={70} y={2} width={120} height={28} rx={8} fill="none" stroke={nc} strokeWidth={2} strokeDasharray="5,3"/>
+    <text x={130} y={14} textAnchor="middle" fontSize={7} fill={nc} fontWeight="600">VL53L8CX (거북목 3D)</text>
+    <text x={130} y={24} textAnchor="middle" fontSize={8} fill={nc} fontWeight="700">{((1-nd)*100).toFixed(0)}%</text>
+    {/* MPU6050 (등판 상단) */}
+    <rect x={180} y={36} width={50} height={18} rx={5} fill="#0ea5e920" stroke="#0ea5e9" strokeWidth={1}/>
+    <text x={205} y={48} textAnchor="middle" fontSize={6} fill="#0ea5e9" fontWeight="700">MPU {((mpu?.tiltX||0)*100).toFixed(0)}°</text>
+    {/* 등받이 외곽 */}
+    <rect x={25} y={34} width={210} height={195} rx={14} fill="#eaecef" stroke="#9ca3af" strokeWidth={1.5}/>
+    <text x={85} y={49} textAnchor="middle" fontSize={9} fill="#9ca3af" fontWeight="600">등받이</text>
+    {/* 3x4 grid */}
+    {[0,1,2,3].map(row=>{
+      const y=58+row*40;
+      return <g key={row}>
+        {/* Left pressure */}
+        <rect x={35} y={y} width={55} height={35} rx={6} fill={c(row)} opacity={o(row)} stroke="#555" strokeWidth={1.2}/>
+        <text x={62} y={y+20} textAnchor="middle" fontSize={7} fill="#fff" fontWeight="700">{ZONES[row].label.replace("등 ","")}</text>
+        {/* ToF center */}
+        <rect x={100} y={y} width={55} height={35} rx={6} fill="none" stroke={tc(row)} strokeWidth={2} strokeDasharray="4,3"/>
+        <text x={128} y={y+15} textAnchor="middle" fontSize={7} fill={tc(row)} fontWeight="600">ToF</text>
+        <text x={128} y={y+25} textAnchor="middle" fontSize={7} fill={tc(row)} fontWeight="700">{tofDevs?((1-tofDevs[row])*100).toFixed(0)+"%" :"—"}</text>
+        {/* Right pressure */}
+        <rect x={165} y={y} width={55} height={35} rx={6} fill={c(row+4)} opacity={o(row+4)} stroke="#555" strokeWidth={1.2}/>
+        <text x={192} y={y+20} textAnchor="middle" fontSize={7} fill="#fff" fontWeight="700">{ZONES[row+4].label.replace("등 ","")}</text>
+      </g>;
+    })}
+    {/* 좌석 외곽 */}
+    <rect x={25} y={240} width={210} height={140} rx={14} fill="#eaecef" stroke="#9ca3af" strokeWidth={1.5}/>
+    <text x={130} y={255} textAnchor="middle" fontSize={9} fill="#9ca3af" fontWeight="600">좌석</text>
+    {/* 2x2 seat grid - centered */}
+    {/* Back row: SBL(8), SBR(9) */}
+    <rect x={35} y={263} width={91} height={50} rx={8} fill={c(8)} opacity={o(8)} stroke="#555" strokeWidth={1.2}/>
+    <text x={80} y={292} textAnchor="middle" fontSize={8} fill="#fff" fontWeight="700">뒤왼</text>
+    <rect x={134} y={263} width={91} height={50} rx={8} fill={c(9)} opacity={o(9)} stroke="#555" strokeWidth={1.2}/>
+    <text x={180} y={292} textAnchor="middle" fontSize={8} fill="#fff" fontWeight="700">뒤오른</text>
+    {/* Front row: SFL(10), SFR(11) */}
+    <rect x={35} y={320} width={91} height={50} rx={8} fill={c(10)} opacity={o(10)} stroke="#555" strokeWidth={1.2}/>
+    <text x={80} y={349} textAnchor="middle" fontSize={8} fill="#fff" fontWeight="700">앞왼</text>
+    <rect x={134} y={320} width={91} height={50} rx={8} fill={c(11)} opacity={o(11)} stroke="#555" strokeWidth={1.2}/>
+    <text x={180} y={349} textAnchor="middle" fontSize={8} fill="#fff" fontWeight="700">앞오른</text>
+  </svg>;
+}
+/* ═══ SPINE SIDE VIEW ═══ */
+function SpineView({tof,tofDevs,neck,neckDev,mpu}){
+  const t=tof||[.08,.08,.1,.12]; // VL53L0X 4개 = 요추 전용
+  const td=tofDevs||[0,0,0,0];
+  const nd=neck?.dist||0;       // VL53L8CX = 거북목 거리
+  const ndv=neckDev||0;         // 거북목 편차
+  const lowerTof=avgOf(t);
+  const tiltX=mpu?.tiltX||0;    // MPU6050 전후 기울기
+  const segData=[];
+  let segY=55;
+  const segH=14;
+  const baseX=135;
+  // 경추 (3 segments) - VL53L8CX에 반응
+  const neckFwd=nd*45;
+  for(let i=0;i<3;i++){
+    const fwd=neckFwd*(1-i*0.25);
+    segData.push({x:baseX-fwd,y:segY,color:nd>.3?lc(ndv):"#a3a3a3",label:i===1?"경추":"",region:"경추",dev:nd>.25?ndv:null});
+    segY+=segH;
+  }
+  // 흉추 (6 segments) - 요추 상위 ToF의 약한 영향 + MPU 기울기 반영
+  for(let i=0;i<6;i++){
+    const lumbarInfluence=t[0]*0.3;  // 상부 요추 ToF의 간접 영향
+    const tiltInfluence=Math.max(0,-tiltX*15); // 앞으로 기울면 흉추도 앞으로
+    const fwd=(lumbarInfluence+tiltInfluence*0.1)*(i/5)*30;
+    const dev=td[0]*0.4;
+    segData.push({x:baseX-fwd,y:segY,color:lumbarInfluence>.15?lc(dev):"#a3a3a3",label:i===2?"흉추":"",region:"흉추",dev:lumbarInfluence>.1?dev:null});
+    segY+=segH;
+  }
+  // 요추 (5 segments) - VL53L0X 4개 직접 매핑
+  for(let i=0;i<5;i++){
+    const tIdx=Math.min(i,3);
+    const fwd=t[tIdx]*40;
+    const dev=td[tIdx];
+    segData.push({x:baseX-fwd,y:segY,color:lc(dev),label:i===2?"요추":"",region:"요추",dev});
+    segY+=segH;
+  }
+  // 천추 (2 segments)
+  for(let i=0;i<2;i++){segData.push({x:baseX-t[3]*30,y:segY,color:"#a3a3a3",label:i===0?"천추":"",region:"천추"});segY+=segH;}
+  const totalH=segY+10;
+  const topSeg=segData[0];
+  const topX=topSeg?topSeg.x:baseX;
+  const topY=topSeg?topSeg.y:55;
+  return <svg viewBox={`0 0 240 ${totalH}`} style={{width:"100%",maxWidth:230,display:"block",margin:"0 auto"}}>
+    {/* Chair back only */}
+    <rect x={150} y={48} width={18} height={220} rx={6} fill="#eaecef" stroke="#d1d5db" strokeWidth={1}/>
+    {/* Spine vertebrae (경추가 곧 목 표현) */}
+    {segData.map((seg,i)=>{
+      const w=22,h=segH-3;
+      const nextSeg=segData[i+1];
+      return <g key={i}>
+        <rect x={seg.x-w/2} y={seg.y} width={w} height={h} rx={4}
+          fill={seg.color} opacity={seg.dev!=null?.85:.5} stroke="#555" strokeWidth={1}/>
+        {nextSeg&&<line x1={seg.x} y1={seg.y+h} x2={nextSeg.x} y2={nextSeg.y}
+          stroke="#888" strokeWidth={2} strokeLinecap="round"/>}
+        {seg.label&&<>
+          <line x1={seg.x-w/2-3} y1={seg.y+h/2} x2={20} y2={seg.y+h/2} stroke="#aaa" strokeWidth={.5} strokeDasharray="2,2"/>
+          <text x={16} y={seg.y+h/2+3} textAnchor="end" fontSize={8} fill="#737373" fontWeight="600">{seg.label}</text>
+        </>}
+      </g>;
+    })}
+    {/* Body silhouette (starts from cervical top) */}
+    <path d={`M${topX-10},${topY-2} Q${segData[3]?segData[3].x-16:110},${segData[3]?segData[3].y:90} ${segData[7]?segData[7].x-14:100},${segData[7]?segData[7].y:155}
+      L${segData[13]?segData[13].x-8:95},${segData[13]?segData[13].y:230} L${segData[13]?segData[13].x+18:125},${segData[13]?segData[13].y:230}
+      Q${segData[7]?segData[7].x+18:135},${segData[7]?segData[7].y:155} ${segData[3]?segData[3].x+16:145},${segData[3]?segData[3].y:90}
+      L${topX+10},${topY-2} Z`}
+      fill="#d4d4d4" opacity={.2}/>
+    {/* ToF distance indicators */}
+    {[0,1,2,3].map(i=>{
+      const si=i===0?3:i===1?6:i===2?9:13;
+      const seg=segData[si];if(!seg)return null;
+      const gap=t[i]*40;
+      if(gap<3)return null;
+      return <g key={`tof${i}`}>
+        <line x1={seg.x+12} y1={seg.y+5} x2={153} y2={seg.y+5} stroke={lc(td[i])} strokeWidth={1} strokeDasharray="3,2"/>
+        <text x={156} y={seg.y+8} fontSize={7} fill={lc(td[i])} fontWeight="700">{(t[i]*100).toFixed(0)}%</text>
+      </g>;
+    })}
+    {/* Turtle neck (VL53L8CX) */}
+    {nd>.3&&<g>
+      <line x1={topX-12} y1={topY+3} x2={topX-28} y2={topY-10} stroke="#9333ea" strokeWidth={1.5}/>
+      <polygon points={`${topX-28},${topY-14} ${topX-32},${topY-6} ${topX-24},${topY-8}`} fill="#9333ea"/>
+      <text x={topX-30} y={topY-16} textAnchor="middle" fontSize={8} fill="#9333ea" fontWeight="700">거북목</text>
+    </g>}
+    {/* Lumbar (VL53L0X) */}
+    {lowerTof>.35&&<g>
+      <text x={5} y={segData[10]?(segData[10].y+5):185} fontSize={8} fill="#be185d" fontWeight="700">요추 굽힘</text>
+    </g>}
+    {/* Half-lying */}
+    {lowerTof>.3&&nd<.15&&<g>
+      <text x={5} y={segData[5]?segData[5].y:130} fontSize={8} fill="#0369a1" fontWeight="700">반누움</text>
+    </g>}
+    {/* MPU tilt */}
+    {Math.abs(tiltX)>.1&&<g>
+      <text x={170} y={20} fontSize={7} fill="#6b7280" fontWeight="600">기울기 {(tiltX*100).toFixed(0)}%</text>
+    </g>}
+  </svg>;
+}
+/* ═══ PRESSURE SLIDER (swipe between views) ═══ */
+function PressureSlider({devs,tofDevs,tof,neck,neckDev,mpu}){
+  const [page,setPage]=useState(0);
+  const startRef=useRef(null);
+  const dxRef=useRef(0);
+  const [dragging,setDrag]=useState(false);
+  const [dOff,setDOff]=useState(0);
+  const onS=useCallback(x=>{startRef.current=x;dxRef.current=0;setDrag(true);},[]);
+  const onM=useCallback(x=>{if(startRef.current===null)return;let d=x-startRef.current;
+    // clamp: page 0 cannot go right, page 1 cannot go left
+    if(page===0&&d>0)d=0;
+    if(page===1&&d<0)d=0;
+    dxRef.current=d;setDOff(d);},[page]);
+  const onE=useCallback(()=>{if(startRef.current===null)return;
+    if(dxRef.current<-40&&page===0)setPage(1);else if(dxRef.current>40&&page===1)setPage(0);
+    startRef.current=null;dxRef.current=0;setDrag(false);setDOff(0);},[page]);
+  const labels=["좌석 압력 분포","측면 척추 분석"];
+  return <div style={{overflow:"hidden",position:"relative"}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+      <span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{labels[page]}</span>
+      <div style={{display:"flex",gap:5}}>
+        {[0,1].map(i=><div key={i} style={{width:i===page?16:6,height:6,borderRadius:3,background:i===page?"#2563eb":"#d1d5db",transition:"all .2s"}}/>)}
+      </div></div>
+    <div onTouchStart={e=>onS(e.touches[0].clientX)} onTouchMove={e=>onM(e.touches[0].clientX)} onTouchEnd={onE}
+      onMouseDown={e=>{e.preventDefault();onS(e.clientX);
+        const mm=ev=>onM(ev.clientX);const mu=()=>{onE();window.removeEventListener("mousemove",mm);window.removeEventListener("mouseup",mu);};
+        window.addEventListener("mousemove",mm);window.addEventListener("mouseup",mu);}}
+      style={{cursor:"grab",userSelect:"none",touchAction:"pan-y"}}>
+      <div style={{display:"flex",width:"200%",transform:`translateX(calc(${-page*50}% + ${dragging?dOff:0}px))`,transition:dragging?"none":"transform .3s ease-out"}}>
+        <div style={{width:"50%",flexShrink:0}}><ChairView devs={devs} tofDevs={tofDevs} neck={neck} neckDev={neckDev} mpu={mpu}/></div>
+        <div style={{width:"50%",flexShrink:0}}><SpineView tof={tof} tofDevs={tofDevs} neck={neck} neckDev={neckDev} mpu={mpu}/></div>
+      </div></div>
+    <div style={{textAlign:"center",marginTop:4}}>
+      <span style={{fontSize:9,color:"#c4c4c4"}}>{page===0?"← 밀어서 척추 분석":"밀어서 좌석 분포 →"}</span></div>
+  </div>;
+}
+/* ═══ SHARED UI COMPONENTS ═══ */
+function ScoreBar({score,penalty,posture,alertActive}){
+  const col=sc(score);
+  const flags=posture?posture.split("+").filter(Boolean):["GOOD"];
+  return <div style={{display:"flex",flexDirection:"column",gap:6}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <div style={{display:"flex",alignItems:"baseline",gap:4}}>
+        <span style={{fontSize:34,fontWeight:800,color:col,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{Math.round(score)}</span>
+        <span style={{fontSize:13,fontWeight:600,color:"#9ca3af"}}>/ 100</span></div>
+      <div style={{display:"flex",alignItems:"center",gap:4,flexWrap:"wrap",justifyContent:"flex-end"}}>
+        {penalty>1&&<span style={{fontSize:10,padding:"2px 7px",borderRadius:6,background:"#fff7ed",color:"#c2410c",fontWeight:700}}>x{penalty.toFixed(1)}</span>}
+        {flags.map(f=>{const p=POS[f]||POS.GOOD;return <span key={f} style={{padding:"3px 8px",borderRadius:12,fontSize:10,fontWeight:700,background:p.color==="#16a34a"?"#dcfce7":`${p.color}18`,color:p.color,whiteSpace:"nowrap"}}>{p.label}</span>;})}
+      </div></div>
+    <div style={{position:"relative",height:14,background:"#f1f5f9",borderRadius:7,overflow:"hidden"}}>
+      <div style={{position:"absolute",left:0,top:0,bottom:0,borderRadius:7,width:`${cl(score,0,100)}%`,background:`linear-gradient(90deg,${col}cc,${col})`,transition:"width .4s,background .4s"}}/>
+      {[25,50,75].map(t=><div key={t} style={{position:"absolute",left:`${t}%`,top:0,bottom:0,width:1,background:"rgba(255,255,255,.5)"}}/>)}</div>
+    {alertActive&&<div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:6,height:6,borderRadius:3,background:"#ef4444",animation:"pulse 1s infinite"}}/><span style={{fontSize:10,color:"#dc2626",fontWeight:600}}>STM32 피드백 활성</span></div>}
+  </div>;
+}
+function Card({children,style,onClick}){
+  return <div onClick={onClick} style={{background:"#fff",borderRadius:14,padding:16,boxShadow:"0 1px 4px rgba(0,0,0,.06)",border:"1px solid #f3f4f6",cursor:onClick?"pointer":"default",...style}}>{children}</div>;
+}
+function Sheet({children,onClose,closable=true}){
+  return <div onClick={e=>{if(closable&&e.target===e.currentTarget)onClose?.();}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200}}>
+    <div style={{background:"#fff",borderRadius:"20px 20px 0 0",width:"100%",maxWidth:420,maxHeight:"85vh",overflow:"auto",animation:"slideUp .25s ease-out"}}>
+      <div style={{display:"flex",justifyContent:"center",padding:"10px 0 4px"}}><div style={{width:36,height:4,borderRadius:2,background:"#d1d5db"}}/></div>
+      <div style={{padding:"0 18px 28px"}}>{children}</div></div></div>;
+}
+function CenterPopup({children,onClose}){
+  return <div onClick={e=>{if(e.target===e.currentTarget)onClose();}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:350,padding:20}}>
+    <div style={{background:"#fff",borderRadius:16,padding:24,width:"100%",maxWidth:320,animation:"fadeIn .15s ease-out"}}>{children}</div></div>;
+}
+function PostureBreakdownPopup({stats,label,onClose}){
+  if(!stats?.length)return null;
+  return <CenterPopup onClose={onClose}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+      <span style={{fontSize:15,fontWeight:800}}>{label} 자세 분포</span>
+      <button onClick={onClose} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"#9ca3af"}}>✕</button></div>
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {stats.map(({posture,pct})=>{const p=POS[posture]||{label:posture,color:"#6b7280"};
+        return <div key={posture} style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:10,height:10,borderRadius:5,background:p.color,flexShrink:0}}/>
+          <span style={{fontSize:12,flex:1}}>{p.label}</span>
+          <div style={{width:80,height:6,background:"#f1f5f9",borderRadius:3,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:p.color,borderRadius:3}}/></div>
+          <span style={{fontSize:12,fontWeight:700,color:p.color,width:36,textAlign:"right"}}>{pct}%</span>
+        </div>;})}
+    </div></CenterPopup>;
+}
+function PostureChip({block,onShowBreakdown}){
+  if(!block)return null;
+  const stats=postureStats(block);const top=stats[0];if(!top)return null;
+  const p=POS[top.posture]||{label:top.posture||"—",color:"#6b7280"};
+  return <span onClick={e=>{e.stopPropagation();onShowBreakdown({stats,label:block.label||""});}}
+    style={{fontSize:11,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:3}}>
+    <span style={{color:p.color}}>{p.label}</span>
+    <span style={{fontSize:10,fontWeight:700,color:p.color,background:p.color+"18",padding:"1px 5px",borderRadius:4}}>{top.pct}%</span></span>;
+}
+function DetailPopup({block,onClose,unitLabel}){
+  if(!block?.children?.length)return null;const avg=avgOf(block.children.map(c=>c?.score||0));
+  return <Sheet onClose={onClose}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+      <span style={{fontSize:15,fontWeight:800}}>{block.label} 상세</span>
+      <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#9ca3af"}}>✕</button></div>
+    <div style={{display:"flex",justifyContent:"space-around",marginBottom:14}}>
+      <div style={{textAlign:"center"}}><div style={{fontSize:20,fontWeight:800,color:sc(avg)}}>{Math.round(avg)}점</div><div style={{fontSize:10,color:"#9ca3af"}}>평균</div></div>
+      <div style={{textAlign:"center"}}><div style={{fontSize:20,fontWeight:800,color:"#3b82f6"}}>{block.children.length}</div><div style={{fontSize:10,color:"#9ca3af"}}>{unitLabel}</div></div></div>
+    <div style={{maxHeight:300,overflow:"auto"}}>{block.children.filter(Boolean).map((m,i)=><div key={i} style={{display:"flex",alignItems:"center",padding:"5px 0",borderBottom:i<block.children.length-1?"1px solid #f3f4f6":"none",fontSize:11}}>
+      <span style={{color:"#9ca3af",width:60}}>{m.label||"—"}</span>
+      <span style={{fontWeight:800,color:sc(m.score||0),width:40}}>{Math.round(m.score||0)}점</span>
+      <span style={{flex:1}}/><span style={{color:POS[m.posture]?.color||"#374151"}}>{POS[m.posture]?.label||m.posture||"—"}</span>
+    </div>)}</div></Sheet>;
+}
+function BlockRow({block,index,total,onDetail,onShowBreakdown}){
+  if(!block)return null;
+  return <div onClick={()=>onDetail(block)} style={{display:"flex",alignItems:"center",padding:"8px 0",borderBottom:index<total-1?"1px solid #f3f4f6":"none",cursor:"pointer"}}>
+    <span style={{fontSize:11,color:"#9ca3af",width:60,flexShrink:0}}>{block.label||"—"}</span>
+    <span style={{fontSize:14,fontWeight:800,color:sc(block.score||0),width:44,flexShrink:0}}>{Math.round(block.score||0)}점</span>
+    <span style={{flex:1}}/><PostureChip block={block} onShowBreakdown={onShowBreakdown}/>
+    <span style={{fontSize:14,color:"#d1d5db",marginLeft:6,flexShrink:0}}>›</span></div>;
+}
+function TutorialOverlay({step,onNext,onCalibrate,calibrating,calibrated}){
+  const steps=[
+    {title:"SPCC에 오신 것을 환영합니다!",body:"Smart Posture Correction Chair가 실시간으로 자세를 분석합니다.\n\n등받이에 8개 압력센서 + 4개 ToF 거리센서,\n좌석에 4개 압력센서로 총 16개 센서가\n자세를 정밀하게 측정합니다.",btn:"다음"},
+    {title:"민감도란?",body:"민감도는 자세 편차에 대한 감점 배율입니다.\n\n1.0x = 기본\n2.0x = 작은 움직임에도 큰 감점\n0.5x = 느슨한 점수 변동\n\n프로필 편집에서 변경 가능합니다.",btn:"다음"},
+    {title:"캘리브레이션",body:"올바른 자세로 앉아주세요.\n12개 압력센서 + 4개 ToF 센서의 현재 값을\n'정자세 기준값'으로 저장합니다.",btn:calibrated?"완료":"캘리브레이션 실행",action:true},
+  ];const s=steps[step];
+  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:500,padding:20}}>
+    <div style={{background:"#fff",borderRadius:20,padding:28,width:"100%",maxWidth:360,textAlign:"center"}}>
+      <div style={{display:"flex",justifyContent:"center",gap:6,marginBottom:16}}>{steps.map((_,i)=><div key={i} style={{width:i===step?20:8,height:8,borderRadius:4,background:i===step?"#2563eb":i<step?"#93c5fd":"#e5e7eb"}}/>)}</div>
+      <div style={{fontSize:18,fontWeight:800,marginBottom:12}}>{s.title}</div>
+      <div style={{fontSize:13,lineHeight:1.7,color:"#4b5563",whiteSpace:"pre-line",marginBottom:20,textAlign:"left"}}>{s.body}</div>
+      {calibrating&&<div style={{marginBottom:12,fontSize:12,color:"#2563eb",fontWeight:600}}>센서 데이터 수집 중...</div>}
+      <button onClick={s.action?(calibrated?onNext:onCalibrate):onNext} disabled={calibrating}
+        style={{width:"100%",padding:"12px 0",borderRadius:12,border:"none",fontSize:14,fontWeight:700,cursor:calibrating?"wait":"pointer",
+          background:calibrated&&s.action?"#22c55e":calibrating?"#93c5fd":"#2563eb",color:"#fff",opacity:calibrating?.7:1}}>
+        {calibrating?"캘리브레이션 중...":s.btn}</button>
+      {step<2&&<div style={{marginTop:8,fontSize:11,color:"#9ca3af"}}>{step+1}/3</div>}</div></div>;
+}
+function CalStep({onCalibrate,calibrating,calibrated,onDone}){
+  return <div style={{textAlign:"center",padding:"8px 0"}}>
+    <div style={{fontSize:14,fontWeight:700,marginBottom:8}}>캘리브레이션 필요</div>
+    <div style={{fontSize:12,color:"#6b7280",lineHeight:1.6,marginBottom:16}}>올바른 자세로 앉은 뒤 버튼을 눌러주세요.</div>
+    {calibrating&&<div style={{marginBottom:8,fontSize:12,color:"#2563eb",fontWeight:600}}>수집 중...</div>}
+    {!calibrated?<button onClick={onCalibrate} disabled={calibrating} style={{width:"100%",padding:"11px 0",borderRadius:10,border:"none",background:calibrating?"#93c5fd":"#2563eb",color:"#fff",fontSize:13,fontWeight:700,cursor:calibrating?"wait":"pointer"}}>{calibrating?"캘리브레이션 중...":"캘리브레이션 실행"}</button>
+      :<button onClick={onDone} style={{width:"100%",padding:"11px 0",borderRadius:10,border:"none",background:"#22c55e",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>완료 — 프로필 저장</button>}</div>;
+}
+function EditDialog({profile,onSave,onCancel}){
+  const [n,setN]=useState(profile.name),[se,setSe]=useState(profile.sensitivity),[dl,setDl]=useState(profile.alertDelay);
+  return <CenterPopup onClose={onCancel}>
+    <div style={{fontSize:15,fontWeight:800,marginBottom:16}}>프로필 {profile.slot+1} 편집</div>
+    <div style={{marginBottom:14}}><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:4}}>이름</label>
+      <input value={n} onChange={e=>setN(e.target.value.slice(0,20))} style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"1px solid #d1d5db",fontSize:13,boxSizing:"border-box"}}/></div>
+    <div style={{marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#6b7280",marginBottom:4}}><span>민감도</span><span style={{fontWeight:700,color:"#374151"}}>{se.toFixed(1)}x</span></div>
+      <input type="range" min={.5} max={2} step={.1} value={se} onChange={e=>setSe(parseFloat(e.target.value))} style={{width:"100%",accentColor:"#2563eb"}}/>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#d1d5db"}}><span>둔감</span><span>민감</span></div></div>
+    <div style={{marginBottom:18}}>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#6b7280",marginBottom:4}}><span>경고 유예</span><span style={{fontWeight:700,color:"#374151"}}>{dl}초</span></div>
+      <input type="range" min={15} max={180} step={15} value={dl} onChange={e=>setDl(parseInt(e.target.value))} style={{width:"100%",accentColor:"#2563eb"}}/>
+      <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#d1d5db"}}><span>15초</span><span>3분</span></div></div>
+    <div style={{display:"flex",gap:8}}>
+      <button onClick={onCancel} style={{flex:1,padding:"9px 0",borderRadius:8,border:"1px solid #d1d5db",background:"#fff",color:"#6b7280",fontSize:13,fontWeight:600,cursor:"pointer"}}>취소</button>
+      <button onClick={()=>onSave({...profile,name:n.trim()||`프로필 ${profile.slot+1}`,sensitivity:se,alertDelay:dl})} style={{flex:1,padding:"9px 0",borderRadius:8,border:"none",background:"#2563eb",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>저장</button></div></CenterPopup>;
+}
+/* ═══ HISTORY TAB (separate component to avoid inline IIFE issues) ═══ */
+function HistoryTab({mins,hrs,days,weeks,months,totalMin,onDetail,onShowBreakdown}){
+  const hasData=(mins&&mins.length>0)||(hrs&&hrs.length>0)||(days&&days.length>0)||(weeks&&weeks.length>0)||(months&&months.length>0);
+  if(!hasData){
+    return <Card style={{textAlign:"center",padding:40}}>
+      <div style={{fontSize:28,marginBottom:8}}>📋</div>
+      <div style={{fontSize:13,color:"#9ca3af"}}>데이터가 쌓이면 리포트가 표시됩니다</div>
+    </Card>;
+  }
+  let all=[];
+  try{all=[...safeFlat(months||[]),...safeFlat(weeks||[]),...safeFlat(days||[]),...safeFlat(hrs||[]),...(mins||[]).filter(Boolean)];}catch(e){all=[];}
+  const avg=all.length>0?avgOf(all.map(m=>m&&m.score?m.score:0)):0;
+  const tp=all.length>0?topP(all.map(m=>m&&m.posture?m.posture:"GOOD").filter(Boolean)):"GOOD";
+  const renderBlock=(arr,title,unit)=>{
+    if(!arr||arr.length===0)return null;
+    return <Card>
+      <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>{title}</div>
+      <div style={{maxHeight:200,overflow:"auto"}}>
+        {arr.map((b,i)=>{
+          if(!b)return null;
+          return <BlockRow key={b.key||`b${i}`} block={b} index={i} total={arr.length}
+            onDetail={bl=>onDetail(bl,unit)} onShowBreakdown={onShowBreakdown}/>;
+        })}
+      </div>
+    </Card>;
+  };
+  return <>
+    <Card>
+      <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>전체 요약</div>
+      <div style={{display:"flex",justifyContent:"space-around"}}>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:22,fontWeight:800,color:sc(avg)}}>{Math.round(avg)}점</div>
+          <div style={{fontSize:10,color:"#9ca3af"}}>평균</div>
+        </div>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:22,fontWeight:800,color:"#3b82f6"}}>{fmtNum(totalMin||0)}</div>
+          <div style={{fontSize:10,color:"#9ca3af"}}>총(분)</div>
+        </div>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:14,fontWeight:800,color:POS[tp]?.color||"#374151"}}>{POS[tp]?.label||"정자세"}</div>
+          <div style={{fontSize:10,color:"#9ca3af"}}>주요 자세</div>
+        </div>
+      </div>
+    </Card>
+    {renderBlock(months,"전체 (월별)","주")}
+    {renderBlock(weeks,"월간 (주별)","일")}
+    {renderBlock(days,"주간 (일별)","시간")}
+    {renderBlock(hrs,"오늘 시간별","분")}
+    {mins&&mins.length>0&&<Card>
+      <div style={{fontSize:13,fontWeight:700,marginBottom:8}}>현재 시간대 (분별)</div>
+      <div style={{maxHeight:200,overflow:"auto"}}>
+        {[...mins].reverse().map((m,i)=>{
+          if(!m)return null;
+          return <div key={m.key||`min${i}`} style={{display:"flex",alignItems:"center",padding:"5px 0",borderBottom:i<mins.length-1?"1px solid #f3f4f6":"none",fontSize:11}}>
+            <span style={{color:"#9ca3af",width:55}}>{m.label||"—"}</span>
+            <span style={{fontWeight:800,color:sc(m.score||0),width:40}}>{Math.round(m.score||0)}점</span>
+            <span style={{flex:1}}/>
+            <span style={{color:POS[m.posture]?.color||"#374151"}}>{POS[m.posture]?.label||"—"}</span>
+          </div>;
+        })}
+      </div>
+    </Card>}
+  </>;
+}
+const B=bg=>({padding:"7px 14px",borderRadius:8,border:"none",background:bg,color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"});
+const Bs={padding:"5px 10px",borderRadius:6,border:"none",fontSize:10,fontWeight:600,cursor:"pointer"};
+const Bp={flex:1,padding:"6px 0",borderRadius:8,border:"none",background:"#f1f5f9",color:"#374151",fontSize:11,fontWeight:600,cursor:"pointer"};
+/* ═══════════ MAIN ═══════════ */
+const App = function App(){
+  const [tab,setTab]=useState("dash");
+  const [connected,setCon]=useState(false);
+  const [running,setRun]=useState(false);
+  const [score,setScore]=useState(100);
+  const [devs,setDevs]=useState(ZONES.map(()=>0));
+  const [tofDevs,setTofDevs]=useState([0,0,0,0]);
+  const [tof,setTof]=useState([.08,.08,.1,.12]);
+  const [neck,setNeck]=useState({dist:0,angle:0});
+  const [neckDev,setNeckDev]=useState(0);
+  const [mpu,setMpu]=useState({tiltX:0,tiltY:0});
+  const [posture,setPos]=useState("GOOD");
+  const [penalty,setPen]=useState(1);
+  const [alert,setAlert]=useState(false);
+  const [simFlags,setSimFlags]=useState([]);
+  const [profiles,setProfiles]=useState(Array.from({length:5},(_,i)=>mkProf(i)));
+  const [actProf,setActProf]=useState(0);
+  const [showProf,setShowProf]=useState(false);
+  const [editSlot,setEditSlot]=useState(null);
+  const [aiResult,setAiResult]=useState(null);
+  const [aiLoading,setAiLoading]=useState(false);
+  const [aiMode,setAiMode]=useState("today");
+  const [firstEver,setFirst]=useState(true);
+  const [tutStep,setTutStep]=useState(0);
+  const [tutCaling,setTutCaling]=useState(false);
+  const [tutCaled,setTutCaled]=useState(false);
+  const [needsCal,setNeedsCal]=useState(null);
+  const [pCaling,setPCaling]=useState(false);
+  const [pCaled,setPCaled]=useState(false);
+  const [locked,setLocked]=useState(true);
+  const [detailPopup,setDetailPopup]=useState(null);
+  const [detailUnit,setDetailUnit]=useState("분");
+  const [breakdownPopup,setBreakdownPopup]=useState(null);
+  const [tick,setTick]=useState(0);
+  const sync=useCallback(()=>setTick(t=>t+1),[]);
+  const minRef=useRef([]),hourRef=useRef([]),dayRef=useRef([]),weekRef=useRef([]),monthRef=useRef([]);
+  const mcRef=useRef(0),bufRef=useRef([]);
+  const penR=useRef(1),alertR=useRef(null);
+  const ap=profiles[actProf],hasCal=ap.calibration!==null;
+  const cal=hasCal?ap.calibration:ZONES.map(()=>.5);
+  const calTof=ap.calTof||[.08,.08,.1,.12];
+  const calNeck=ap.calNeck||{dist:.08,angle:0};
+  const calMpu=ap.calMpu||{tiltX:0,tiltY:0};
+  const collapseMin=useCallback(()=>{const ms=[...minRef.current];minRef.current=[];const avg=avgOf(ms.map(m=>m.score)),tp=topP(ms.map(m=>m.posture));
+    hourRef.current.push({label:`${hourRef.current.length+1}시간째`,score:avg,posture:tp,children:ms,key:`h${hourRef.current.length}`});},[]);
+  const collapseHour=useCallback(()=>{const hs=[...hourRef.current];hourRef.current=[];const avg=avgOf(hs.map(h=>h.score)),tp=topP(hs.map(h=>h.posture));
+    dayRef.current.push({label:`${dayRef.current.length+1}일째`,score:avg,posture:tp,children:hs,key:`d${dayRef.current.length}`});},[]);
+  const collapseDay=useCallback(()=>{const ds=[...dayRef.current];dayRef.current=[];const avg=avgOf(ds.map(d=>d.score)),tp=topP(ds.map(d=>d.posture));
+    weekRef.current.push({label:`${weekRef.current.length+1}주째`,score:avg,posture:tp,children:ds,key:`w${weekRef.current.length}`});},[]);
+  const collapseWeek=useCallback(()=>{const ws=[...weekRef.current];weekRef.current=[];const avg=avgOf(ws.map(w=>w.score)),tp=topP(ws.map(w=>w.posture));
+    monthRef.current.push({label:`${monthRef.current.length+1}개월째`,score:avg,posture:tp,children:ws,key:`mo${monthRef.current.length}`});},[]);
+  const addMin=useCallback(rec=>{minRef.current.push(rec);
+    if(minRef.current.length>=60)collapseMin();if(hourRef.current.length>=24)collapseHour();
+    if(dayRef.current.length>=7)collapseDay();if(weekRef.current.length>=4)collapseWeek();
+  },[collapseMin,collapseHour,collapseDay,collapseWeek]);
+  useEffect(()=>{
+    if(!running||locked)return;
+    const iv=setInterval(()=>{
+      const gen=genSensorData(simFlags);
+      const{score:s,devs:d,tofDevs:td,neckDev:nd}=calcScore(gen.z,gen.tof,gen.neck,gen.mpu,cal,calTof,calNeck,calMpu,penR.current,ap.sensitivity);
+      setDevs(d);setTofDevs(td);setTof(gen.tof);setNeck(gen.neck);setNeckDev(nd);setMpu(gen.mpu);setScore(s);
+      const p=detect(gen.z,gen.tof,gen.neck,gen.mpu);setPos(p);
+      if(s<50&&p!=="GOOD"){if(!alertR.current)alertR.current=Date.now();const el=(Date.now()-alertR.current)/1000;
+        if(el>5){setAlert(true);const np=cl(1+.3*Math.floor(el/5),1,3);penR.current=np;setPen(np);}}
+      else{alertR.current=null;penR.current=1;setPen(1);setAlert(false);}
+      bufRef.current.push({score:s,posture:p});
+    },500);return()=>clearInterval(iv);
+  },[running,simFlags,cal,calTof,calNeck,calMpu,locked,ap.sensitivity]);
+  useEffect(()=>{
+    if(!running||locked)return;
+    const iv=setInterval(()=>{const buf=bufRef.current;if(!buf.length)return;bufRef.current=[];
+      const avg=avgOf(buf.map(b=>b.score)),tp=topP(buf.map(b=>b.posture));
+      mcRef.current+=1;const mc=mcRef.current;
+      const hh=String(Math.floor(mc/60)).padStart(2,"0"),mm=String(mc%60).padStart(2,"0");
+      addMin({label:`${hh}:${mm}`,score:avg,posture:tp,key:`m${mc}`});sync();
+    },5000);return()=>clearInterval(iv);
+  },[running,locked,addMin,sync]);
+  const timeSkip=useCallback(count=>{for(let i=0;i<count;i++){
+    const gen=genSensorData(simFlags);const{score:s}=calcScore(gen.z,gen.tof,gen.neck,gen.mpu,cal,calTof,calNeck,calMpu,1,ap.sensitivity);
+    const p=detect(gen.z,gen.tof,gen.neck,gen.mpu);mcRef.current+=1;const mc=mcRef.current;
+    const hh=String(Math.floor(mc/60)).padStart(2,"0"),mm=String(mc%60).padStart(2,"0");
+    addMin({label:`${hh}:${mm}`,score:s,posture:p,key:`m${mc}`});}sync();
+  },[simFlags,cal,calTof,calNeck,calMpu,ap.sensitivity,addMin,sync]);
+  const doConnect=()=>{setCon(true);setRun(true);
+    if(firstEver){setLocked(true);setTutStep(0);setTutCaled(false);}
+    else if(!hasCal){setLocked(true);setNeedsCal(actProf);setPCaled(false);setShowProf(true);}
+    else setLocked(false);};
+  const doCal=(setter,doneSetter,slot)=>{setter(true);setTimeout(()=>{
+    const g=genSensorData([]);setProfiles(p=>{const n=[...p];n[slot]={...n[slot],calibration:g.z,calTof:g.tof,calNeck:g.neck,calMpu:g.mpu};return n;});
+    setter(false);doneSetter(true);},1500);};
+  const tutDone=()=>{if(tutStep<2){setTutStep(tutStep+1);return;}setFirst(false);setLocked(false);};
+  const profDone=()=>{setNeedsCal(null);setPCaled(false);setLocked(false);setShowProf(false);};
+  const switchProf=i=>{setActProf(i);penR.current=1;setPen(1);
+    if(profiles[i].calibration===null){setNeedsCal(i);setPCaled(false);setLocked(true);}else{setLocked(false);setShowProf(false);}};
+  const resetProf=i=>{setProfiles(pr=>{const n=[...pr];n[i]=mkProf(i);return n;});
+    if(i===actProf){setNeedsCal(i);setPCaled(false);setLocked(true);}};
+  const runAi=()=>{setAiLoading(true);setTimeout(()=>{
+    let all;
+    try{
+      if(aiMode==="month")all=[...safeFlat(monthRef.current),...safeFlat(weekRef.current),...safeFlat(dayRef.current),...safeFlat(hourRef.current),...(minRef.current||[])];
+      else if(aiMode==="week")all=[...safeFlat(dayRef.current),...safeFlat(hourRef.current),...(minRef.current||[])];
+      else all=[...safeFlat(hourRef.current),...(minRef.current||[])];
+      all=all.filter(Boolean);
+    }catch(e){all=[];}
+    if(!all.length){setAiLoading(false);return;}
+    const avg=avgOf(all.map(m=>m?.score||0)),tp=topP(all.map(m=>m?.posture).filter(Boolean));
+    const third=Math.max(1,Math.floor(all.length/3));
+    const ea=avgOf(all.slice(0,third).map(m=>m?.score||0)),la=avgOf(all.slice(-third).map(m=>m?.score||0));
+    const diff=la-ea;const trend=diff>5?"뚜렷한 개선 추세.":diff>1?"소폭 향상 추세.":diff>-1?"비슷한 수준 유지.":diff>-5?"소폭 악화 추세.":"자세 악화, 주의 필요.";
+    const pl=aiMode==="month"?"월간":aiMode==="week"?"주간":"오늘";
+    setAiResult({period:pl,
+      summary:`${pl} 평균 ${Math.round(avg)}점. ${POS[tp]?.label||"정자세"} 가장 빈번. ${avg>=70?"전반적으로 양호.":"교정 필요 구간 다수."}`,
+      trend:`초반 ${Math.round(ea)}점 → 최근 ${Math.round(la)}점 (${diff>0?"+":""}${diff.toFixed(1)}). ${trend}`,
+      problem:tp!=="GOOD"?`${POS[tp]?.label} 자세가 지배적입니다. 장시간 유지 시 척추 건강에 악영향을 줄 수 있습니다.`:"특별한 문제점이 발견되지 않았습니다.",
+      exercise:tp==="TURTLE_NECK"?"턱 당기기 운동: 턱을 목 쪽으로 천천히 당기고 5초 유지, 10회 반복. 목 뒤 근육 강화에 효과적.":tp==="LUMBAR_FWD"||tp==="SLOUCH"||tp==="LEAN_FORWARD"?"고양이-소 스트레칭: 등을 둥글게 말았다 펴기 10회. 요추 부담 완화에 효과적.":tp==="HALF_LYING"?"코어 강화 운동: 의자에 앉아 등을 떼고 복부에 힘을 주며 5초 유지, 10회. 엉덩이를 의자 깊숙이 밀어 넣는 습관을 기르세요.":tp?.includes("LEFT")||tp?.includes("RIGHT")?"골반 교정 스트레칭: 한쪽 발목을 반대편 무릎에 올리고 숙여 20초, 양쪽 3회.":"전신 스트레칭: 의자에서 일어나 양팔을 위로 뻗고 좌우로 기울이기 10회.",
+    });setAiLoading(false);},2000);};
+  const mins=[...(minRef.current||[])],hrs=[...(hourRef.current||[])],days=[...(dayRef.current||[])],weeks=[...(weekRef.current||[])],months=[...(monthRef.current||[])];
+  const totalMin=mcRef.current||0,totalDays=Math.floor(totalMin/1440);
+  const hasWeek=days.length>0||weeks.length>0||months.length>0;
+  const hasMonth=weeks.length>0||months.length>0;
+  const tabs=[{id:"dash",label:"대시보드",icon:"◉"},{id:"history",label:"리포트",icon:"◩"},{id:"ai",label:"AI 분석",icon:"◈"}];
+  return <div style={{maxWidth:420,margin:"0 auto",height:"100%",display:"flex",flexDirection:"column",background:"#f8f9fb",fontFamily:"'Pretendard Variable','Noto Sans KR',-apple-system,sans-serif"}}>
+    <div style={{padding:"14px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fff",borderBottom:"1px solid #eee"}}>
+      <span style={{fontSize:17,fontWeight:800,letterSpacing:-.5,color:"#1e293b"}}>SPCC</span>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        {connected&&<span style={{fontSize:10,padding:"3px 8px",borderRadius:10,fontWeight:600,background:running&&!locked?"#dcfce7":locked?"#fef3c7":"#fee2e2",color:running&&!locked?"#16a34a":locked?"#a16207":"#dc2626"}}>{locked?"⏳ 설정 중":running?"● 수신 중":"○ 중단"}</span>}
+        <div style={{width:8,height:8,borderRadius:4,background:connected?"#22c55e":"#d1d5db"}}/></div></div>
+    <div style={{flex:1,overflow:"auto",padding:"12px 14px",display:"flex",flexDirection:"column",gap:12}}>
+      {tab==="dash"&&<>
+        <Card style={{background:"#f0f4ff",border:"1px solid #bfdbfe"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#3b82f6",marginBottom:8}}>▸ 시뮬레이터 컨트롤</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {!connected?<button onClick={doConnect} style={B("#2563eb")}>BLE 연결</button>
+              :<button onClick={()=>{setCon(false);setRun(false);setLocked(true);}} style={B("#ef4444")}>연결 해제</button>}
+            {connected&&!locked&&<button onClick={()=>setRun(r=>!r)} style={B(running?"#f59e0b":"#22c55e")}>{running?"일시정지":"재개"}</button>}</div>
+          {connected&&!locked&&<>
+            <div style={{marginTop:8,fontSize:10,color:"#6b7280",marginBottom:4}}>자세 시뮬레이션 (중복 선택 가능):</div>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              {Object.entries(DELTAS).map(([k])=>{const v=POS[k];if(!v)return null;const on=simFlags.includes(k);
+                return <button key={k} onClick={()=>setSimFlags(f=>on?f.filter(x=>x!==k):[...f,k])}
+                  style={{...Bs,background:on?v.color:"#f1f5f9",color:on?"#fff":"#374151",fontWeight:on?700:400,
+                    border:on?`2px solid ${v.color}`:"2px solid transparent",padding:"4px 8px"}}>{v.label}</button>;})}
+              {simFlags.length>0&&<button onClick={()=>setSimFlags([])} style={{...Bs,background:"#fef2f2",color:"#ef4444"}}>초기화</button>}
+            </div>
+            <div style={{marginTop:10,paddingTop:8,borderTop:"1px solid #dbeafe"}}>
+              <div style={{fontSize:10,color:"#6b7280",marginBottom:4}}>시간 가속 ({totalDays>0?`${totalDays}일 `:""}{Math.floor(totalMin/60)%24}시간 {totalMin%60}분):</div>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                {[{l:"+10분",v:10},{l:"+1시간",v:60},{l:"+6시간",v:360},{l:"+1일",v:1440},{l:"+1주",v:10080},{l:"+1달",v:40320}].map(t=>
+                  <button key={t.v} onClick={()=>timeSkip(t.v)} style={{...Bs,background:"#dbeafe",color:"#1d4ed8"}}>{t.l}</button>)}</div></div></>}
+        </Card>
+        <Card style={{padding:12}} onClick={connected?()=>setShowProf(true):undefined}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:34,height:34,borderRadius:10,flexShrink:0,background:connected&&hasCal?"#2563eb":connected?"#f59e0b":"#d1d5db",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:14}}>{actProf+1}</div>
+            <div style={{flex:1}}><div style={{fontSize:13,fontWeight:700}}>{ap.name}</div>
+              <div style={{fontSize:10,color:"#9ca3af"}}>{!connected?"BLE 연결 후 변경 가능":!hasCal?"캘리브레이션 필요":"탭하여 프로필 변경"}</div></div>
+            {connected&&<span style={{fontSize:18,color:"#bbb"}}>›</span>}</div></Card>
+        {connected&&!locked?<>
+          <Card><div style={{fontSize:12,fontWeight:700,color:"#6b7280",marginBottom:10}}>실시간 자세 점수</div>
+            <ScoreBar score={score} penalty={penalty} posture={posture} alertActive={alert}/></Card>
+          <Card>
+            <div style={{display:"flex",justifyContent:"center",gap:12,marginBottom:8}}>
+              {[["#22c55e","양호"],["#f59e0b","주의"],["#ef4444","위험"]].map(([c,l])=>
+                <div key={l} style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:10,height:10,borderRadius:5,background:c}}/><span style={{fontSize:10,color:"#6b7280"}}>{l}</span></div>)}</div>
+            <PressureSlider devs={devs} tofDevs={tofDevs} tof={tof} neck={neck} neckDev={neckDev} mpu={mpu}/>
+            <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:3}}>
+              {ZONES.map((z,i)=>{const pct=Math.round((1-devs[i])*100),col=lc(devs[i]);return <div key={z.id} style={{display:"flex",alignItems:"center",fontSize:11,gap:6}}>
+                <div style={{width:8,height:8,borderRadius:4,background:col,flexShrink:0}}/>
+                <span style={{flex:1,color:"#374151"}}>{z.label}</span>
+                <div style={{width:60,height:5,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:col,borderRadius:3,transition:"width .3s"}}/></div>
+                <span style={{width:30,textAlign:"right",fontWeight:700,color:col}}>{pct}%</span></div>;})}
+              {/* ToF list */}
+              {TOF_LABELS.map((l,i)=>{const pct=Math.round((1-(tofDevs[i]||0))*100),col=lc(tofDevs[i]||0);return <div key={l} style={{display:"flex",alignItems:"center",fontSize:11,gap:6}}>
+                <div style={{width:8,height:8,borderRadius:4,background:"#6366f1",flexShrink:0}}/>
+                <span style={{flex:1,color:"#374151"}}>{l}</span>
+                <div style={{width:60,height:5,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:col,borderRadius:3,transition:"width .3s"}}/></div>
+                <span style={{width:30,textAlign:"right",fontWeight:700,color:col}}>{pct}%</span></div>;})}
+              {/* VL53L8CX 거북목 */}
+              {(()=>{const pct=Math.round((1-neckDev)*100),col=lc(neckDev);return <div style={{display:"flex",alignItems:"center",fontSize:11,gap:6}}>
+                <div style={{width:8,height:8,borderRadius:4,background:"#9333ea",flexShrink:0}}/>
+                <span style={{flex:1,color:"#374151"}}>거북목 (VL53L8CX)</span>
+                <div style={{width:60,height:5,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:col,borderRadius:3,transition:"width .3s"}}/></div>
+                <span style={{width:30,textAlign:"right",fontWeight:700,color:col}}>{pct}%</span></div>;})()}
+              {/* MPU6050 기울기 */}
+              <div style={{display:"flex",alignItems:"center",fontSize:11,gap:6}}>
+                <div style={{width:8,height:8,borderRadius:4,background:"#0ea5e9",flexShrink:0}}/>
+                <span style={{flex:1,color:"#374151"}}>의자 기울기 (MPU)</span>
+                <span style={{fontSize:10,color:"#6b7280"}}>전후 {(mpu.tiltX*100).toFixed(0)}%</span>
+                <span style={{fontSize:10,color:"#6b7280"}}>좌우 {(mpu.tiltY*100).toFixed(0)}%</span>
+              </div>
+            </div></Card>
+        </>:connected&&locked?<Card style={{background:"#fffbeb",textAlign:"center",padding:30,border:"1px solid #fde68a"}}>
+            <div style={{fontSize:28,marginBottom:8}}>⏳</div><div style={{fontSize:13,color:"#92400e",fontWeight:600}}>프로필 설정을 완료해주세요</div></Card>
+        :!connected?<Card style={{background:"#f8f8f8",textAlign:"center",padding:40}}>
+            <div style={{fontSize:40,marginBottom:12}}>🪑</div><div style={{fontSize:13,color:"#9ca3af"}}>장치에 연결하면 자세 분석이 시작됩니다</div></Card>:null}
+      </>}
+      {tab==="history"&&<HistoryTab mins={mins} hrs={hrs} days={days} weeks={weeks} months={months} totalMin={totalMin}
+        onDetail={(b,u)=>{setDetailPopup(b);setDetailUnit(u);}} onShowBreakdown={setBreakdownPopup}/>}
+      {tab==="ai"&&<>
+        <Card style={{background:"#f0fdf4",border:"1px solid #bbf7d0"}}><div style={{display:"flex",alignItems:"center",gap:10}}><span style={{fontSize:18}}>🧠</span><div><div style={{fontSize:12,fontWeight:700,color:"#16a34a"}}>AI 모델 준비 완료</div><div style={{fontSize:10,color:"#9ca3af"}}>Gemma 2B (시뮬레이션)</div></div></div></Card>
+        <div style={{display:"flex",gap:6}}>{[{id:"today",label:"오늘",ok:totalMin>=3},{id:"week",label:"주간",ok:hasWeek},{id:"month",label:"월간",ok:hasMonth}].map(m=>
+          <button key={m.id} onClick={()=>setAiMode(m.id)} disabled={!m.ok} style={{...Bs,flex:1,padding:"8px 0",borderRadius:8,fontSize:12,background:aiMode===m.id?"#7c3aed":"#f1f5f9",color:aiMode===m.id?"#fff":m.ok?"#374151":"#d1d5db",fontWeight:aiMode===m.id?700:400,opacity:m.ok?1:.5}}>{m.label}</button>)}</div>
+        <button onClick={runAi} disabled={aiLoading||totalMin<3} style={{...B("#7c3aed"),width:"100%",padding:"10px 0",borderRadius:10,fontSize:13,opacity:aiLoading||totalMin<3?.5:1}}>{aiLoading?"분석 중...":`${aiMode==="today"?"오늘":aiMode==="week"?"주간":"월간"} 분석`}</button>
+        {aiLoading&&<Card style={{background:"#faf5ff",border:"1px solid #e9d5ff"}}><div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:18,height:18,border:"2px solid #e9d5ff",borderTopColor:"#7c3aed",borderRadius:"50%",animation:"spin .8s linear infinite"}}/><span style={{fontSize:12,color:"#6b21a8"}}>AI가 분석 중...</span></div></Card>}
+        {aiResult&&!aiLoading&&<Card><div style={{fontSize:14,fontWeight:800,marginBottom:4}}>{aiResult.period} 분석</div><div style={{fontSize:10,color:"#9ca3af",marginBottom:14}}>Smart Posture Correction Chair</div>
+          {[{icon:"📊",label:"요약",text:aiResult.summary,color:"#2563eb"},{icon:"📈",label:"추이",text:aiResult.trend,color:"#0891b2"},{icon:"⚠️",label:"문제점",text:aiResult.problem,color:"#ea580c"},{icon:"🏃",label:"추천 운동",text:aiResult.exercise,color:"#16a34a"}].map(({icon,label,text,color})=>
+            <div key={label} style={{marginBottom:14}}><div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}><span>{icon}</span><span style={{fontSize:12,fontWeight:700,color}}>{label}</span></div>
+              <div style={{fontSize:12,lineHeight:1.6,color:"#374151",paddingLeft:22}}>{text}</div></div>)}</Card>}
+        {totalMin<3&&!aiResult&&<Card style={{textAlign:"center",padding:30}}><div style={{fontSize:28,marginBottom:8}}>🔬</div><div style={{fontSize:12,color:"#9ca3af"}}>최소 3분 이상의 데이터 필요</div></Card>}</>}
+    </div>
+    {firstEver&&connected&&<TutorialOverlay step={tutStep} onNext={tutDone} onCalibrate={()=>doCal(setTutCaling,setTutCaled,actProf)} calibrating={tutCaling} calibrated={tutCaled}/>}
+    {showProf&&!firstEver&&<Sheet onClose={()=>{if(needsCal===null)setShowProf(false);}} closable={needsCal===null}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+        <span style={{fontSize:16,fontWeight:800}}>프로필 관리</span>
+        {needsCal===null&&<button onClick={()=>setShowProf(false)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:"#9ca3af"}}>✕</button>}</div>
+      {needsCal!==null?<div style={{border:"2px solid #2563eb",borderRadius:12,padding:16,background:"#f0f6ff"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+          <div style={{width:30,height:30,borderRadius:8,background:"#2563eb",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13}}>{needsCal+1}</div>
+          <div style={{fontSize:14,fontWeight:700}}>{profiles[needsCal].name}</div></div>
+        <CalStep onCalibrate={()=>doCal(setPCaling,setPCaled,needsCal)} calibrating={pCaling} calibrated={pCaled} onDone={profDone}/></div>
+      :<div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {profiles.map((p,i)=>{const act=i===actProf,hc=p.calibration!==null;
+          return <div key={i} style={{border:act?"2px solid #2563eb":"1px solid #e5e7eb",borderRadius:12,padding:14,background:act?"#f0f6ff":"#fff"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:30,height:30,borderRadius:8,flexShrink:0,background:act?"#2563eb":"#d1d5db",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,fontSize:13}}>{i+1}</div>
+              <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</div>
+                <div style={{fontSize:10,color:"#9ca3af"}}>{hc?`민감도 ${p.sensitivity.toFixed(1)}x · 유예 ${p.alertDelay}초`:"미설정"}</div></div>
+              {act?<span style={{fontSize:10,padding:"3px 9px",borderRadius:10,background:"#dcfce7",color:"#16a34a",fontWeight:700,flexShrink:0}}>사용 중</span>
+                :<button onClick={()=>switchProf(i)} style={{padding:"5px 12px",borderRadius:8,border:"none",background:"#2563eb",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer",flexShrink:0}}>적용</button>}</div>
+            <div style={{display:"flex",gap:6,marginTop:10}}>
+              <button onClick={()=>{setShowProf(false);setEditSlot(i);}} style={Bp}>편집</button>
+              <button onClick={()=>{setNeedsCal(i);setPCaled(false);}} style={{...Bp,background:hc?"#f1f5f9":"#dbeafe",color:hc?"#374151":"#1d4ed8"}}>{hc?"재캘리브레이션":"캘리브레이션"}</button>
+              <button onClick={()=>resetProf(i)} style={{...Bp,background:"#fef2f2",color:"#ef4444"}}>초기화</button></div></div>;})}</div>}
+    </Sheet>}
+    {detailPopup&&<DetailPopup block={detailPopup} onClose={()=>setDetailPopup(null)} unitLabel={detailUnit}/>}
+    {breakdownPopup&&<PostureBreakdownPopup stats={breakdownPopup.stats} label={breakdownPopup.label} onClose={()=>setBreakdownPopup(null)}/>}
+    {editSlot!==null&&<EditDialog profile={profiles[editSlot]} onCancel={()=>setEditSlot(null)} onSave={u=>{setProfiles(p=>{const n=[...p];n[editSlot]=u;return n;});setEditSlot(null);}}/>}
+    <div style={{display:"flex",borderTop:"1px solid #e5e7eb",background:"#fff",paddingBottom:"env(safe-area-inset-bottom,0)",flexShrink:0}}>
+      {tabs.map(t=><button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,padding:"10px 0 8px",border:"none",background:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,color:tab===t.id?"#2563eb":"#9ca3af",fontWeight:tab===t.id?700:400,fontSize:10}}><span style={{fontSize:18}}>{t.icon}</span>{t.label}</button>)}</div>
+    <style>{`@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}@keyframes fadeIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}`}</style>
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
