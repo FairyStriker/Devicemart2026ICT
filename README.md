@@ -30,3 +30,6 @@
 ③: 공모전 참가신청서
 
 ④: 작품에 사용한 부품명과 디바이스마트 상품코드 리스트 파일
+
+# 공모전 링크
+https://www.devicemart.co.kr/board/view?id=award_board&seq=151400
