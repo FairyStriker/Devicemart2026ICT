@@ -27,7 +27,7 @@ sequenceDiagram
     RPi ->> STM32: GO
     STM32 -->> RPi: DAT stream start
 
-    lop Realtime Processing
+    loop Realtime Processing
         STM32 -->> RPi: DAT packet
 
         RPi ->> RPi: parse_sensor_packet
