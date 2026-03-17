@@ -18,7 +18,7 @@
 sequenceDiagram
     participant App
     participant RPi
-    participatn STM32
+    participant STM32
 
     App ->> RPi: start_measurement
     RPi ->> STM32: CHK_SIT
