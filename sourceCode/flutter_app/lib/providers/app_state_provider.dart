@@ -1,0 +1,170 @@
+// lib/providers/app_state_provider.dart
+
+import 'package:flutter/material.dart';
+
+import '../models/meta_model.dart';
+import '../models/realtime_status_model.dart';
+import '../models/summary_model.dart';
+import '../services/api_service.dart';
+import '../services/polling_service.dart';
+
+class AppStateProvider extends ChangeNotifier {
+  final ApiService api = ApiService();
+  late final PollingService _polling;
+
+  // ─── 연결 상태 ────────────────────────────────────────────
+  bool _connected = false;
+  bool get connected => _connected;
+
+  // ─── 시스템 stage ─────────────────────────────────────────
+  MetaModel _meta = MetaModel.initial();
+  MetaModel get meta => _meta;
+  String get stage => _meta.stage;
+
+  // ─── 실시간 자세 데이터 ──────────────────────────────────
+  RealtimeStatusModel? _realtimeStatus;
+  RealtimeStatusModel? get realtimeStatus => _realtimeStatus;
+
+  // ─── stand event ─────────────────────────────────────────
+  StandEvent? _pendingStandEvent;
+  StandEvent? get pendingStandEvent => _pendingStandEvent;
+
+  // stand event 다이얼로그 중복 방지 플래그
+  bool _standEventConsumed = false;
+
+  // ─── 세션 결과 ────────────────────────────────────────────
+  OverallSummary? _overallSummary;
+  OverallSummary? get overallSummary => _overallSummary;
+
+  final List<MinuteSummary> _minuteSummaries = [];
+  List<MinuteSummary> get minuteSummaries => List.unmodifiable(_minuteSummaries);
+
+  // ─── 실시간 로그 누적 ─────────────────────────────────────
+  final List<String> _logs = [];
+  List<String> get logs => List.unmodifiable(_logs);
+
+  void _addLog(String msg) {
+    final now = DateTime.now();
+    final ts = '${now.hour.toString().padLeft(2,'0')}:'
+               '${now.minute.toString().padLeft(2,'0')}:'
+               '${now.second.toString().padLeft(2,'0')}';
+    _logs.insert(0, '[$ts] $msg');
+    if (_logs.length > 200) _logs.removeLast();
+  }
+
+  AppStateProvider() {
+    _polling = PollingService(api: api);
+    _polling.onMeta = _handleMeta;
+    _polling.onStatus = _handleStatus;
+    _polling.onReport = _handleReport;
+  }
+
+  // ─── 초기화 ───────────────────────────────────────────────
+  Future<void> init() async {}
+
+  // ─── RPi 연결 ─────────────────────────────────────────────
+  Future<bool> connect(String ip) async {
+    api.setBaseUrl(ip);
+    final data = await api.getMeta();
+    if (data != null) {
+      _connected = true;
+      _meta = MetaModel.fromJson(data);
+      _polling.start();
+      _addLog('서버 연결 성공: $ip');
+      notifyListeners();
+      return true;
+    } else {
+      _connected = false;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  void disconnect() {
+    _polling.stop();
+    _connected = false;
+    _meta = MetaModel.initial();
+    notifyListeners();
+  }
+
+  // ─── Polling 콜백 ─────────────────────────────────────────
+  void _handleMeta(Map<String, dynamic> data) {
+    final newStage = data['stage'] ?? '';
+    if (newStage != _meta.stage) {
+      _addLog('stage 변경: ${_meta.stage} → $newStage');
+    }
+    _meta = MetaModel.fromJson(data);
+    _connected = true;
+    notifyListeners();
+  }
+
+  void _handleStatus(Map<String, dynamic> data) {
+    final type = data['type'];
+
+    if (type == 'realtime_status') {
+      final prev = _realtimeStatus;
+      _realtimeStatus = RealtimeStatusModel.fromJson(data);
+
+      // 자세 변경 시 로그
+      if (prev == null || prev.dominantPosture != _realtimeStatus!.dominantPosture) {
+        _addLog('자세 변경: ${_realtimeStatus!.dominantPostureKo}');
+      }
+      // 알림 변경 시 로그
+      if (prev != null && !prev.alert && _realtimeStatus!.alert) {
+        _addLog('⚠ 자세 경고 발생 (stage ${_realtimeStatus!.alertStage})');
+      }
+
+    } else if (type == 'stand_event') {
+      // 이미 처리 중이면 중복 세팅 방지
+      if (!_standEventConsumed && _pendingStandEvent == null) {
+        _pendingStandEvent = StandEvent.fromJson(data);
+        _standEventConsumed = true;
+        _addLog('⚠ STAND 이벤트 감지');
+      }
+    }
+    notifyListeners();
+  }
+
+  void _handleReport(Map<String, dynamic> data) {
+    final type = data['type'];
+    if (type == 'overall_summary') {
+      _overallSummary = OverallSummary.fromJson(data);
+      _addLog('세션 결과 수신');
+    } else if (type == 'minute_summary') {
+      final ms = MinuteSummary.fromJson(data);
+      final exists = _minuteSummaries.any((m) => m.minuteIndex == ms.minuteIndex);
+      if (!exists) {
+        _minuteSummaries.add(ms);
+        _addLog('분 요약 수신: ${ms.minuteIndex + 1}분차');
+      }
+    }
+    notifyListeners();
+  }
+
+  // ─── stand event 처리 완료 ────────────────────────────────
+  void clearStandEvent() {
+    _pendingStandEvent = null;
+    // 일정 시간 후 플래그 해제 (서버 stage가 바뀔 시간 확보)
+    Future.delayed(const Duration(seconds: 3), () {
+      _standEventConsumed = false;
+    });
+    notifyListeners();
+  }
+
+  // ─── 세션 초기화 ─────────────────────────────────────────
+  void resetSession() {
+    _overallSummary = null;
+    _minuteSummaries.clear();
+    _realtimeStatus = null;
+    _logs.clear();
+    _pendingStandEvent = null;
+    _standEventConsumed = false;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _polling.stop();
+    super.dispose();
+  }
+}
