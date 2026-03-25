@@ -9,9 +9,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  provider: ^6.1.1          # 상태 관리
-  http: ^1.2.0              # HTTP 통신
-  shared_preferences: ^2.2.2 # IP 주소 저장
+  provider: ^6.1.1            # 상태 관리
+  http: ^1.2.0                # HTTP 통신 (command POST + 초기 연결 확인)
+  web_socket_channel: ^3.0.1  # WebSocket 수신
+  shared_preferences: ^2.2.2  # IP 주소 저장
 
 dev_dependencies:
   flutter_test:

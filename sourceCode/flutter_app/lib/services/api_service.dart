@@ -1,4 +1,8 @@
 // lib/services/api_service.dart
+//
+// HTTP 통신 서비스
+// - POST /command : 앱 → RPi 명령 전송
+// - GET /meta     : 초기 연결 확인용 (이후 데이터는 WebSocket으로 수신)
 
 import 'dart:convert';
 import 'package:http/http.dart' as http;
@@ -13,19 +17,9 @@ class ApiService {
   String get baseUrl => _baseUrl;
   bool get isConfigured => _baseUrl.isNotEmpty;
 
-  // ─── GET /meta ───────────────────────────────────────────
+  // ─── GET /meta (초기 연결 확인 전용) ────────────────────
   Future<Map<String, dynamic>?> getMeta() async {
     return _get('/meta');
-  }
-
-  // ─── GET /status ─────────────────────────────────────────
-  Future<Map<String, dynamic>?> getStatus() async {
-    return _get('/status');
-  }
-
-  // ─── GET /report ─────────────────────────────────────────
-  Future<Map<String, dynamic>?> getReport() async {
-    return _get('/report');
   }
 
   // ─── POST /command ────────────────────────────────────────

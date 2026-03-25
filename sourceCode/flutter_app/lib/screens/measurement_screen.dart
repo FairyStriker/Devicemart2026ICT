@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/app_state_provider.dart';
 import '../models/realtime_status_model.dart';
+import '../models/sensor_distribution_model.dart';
 import '../models/stage.dart';
 import '../widgets/chair_sensor_widget.dart';
 
@@ -136,7 +137,7 @@ class _MeasurementScreenState extends State<MeasurementScreen>
         controller: _tabs,
         children: [
           _DashboardTab(status: app.realtimeStatus),
-          _PressureTab(status: app.realtimeStatus),
+          _PressureTab(distribution: app.sensorDistribution),
           _ProtocolTab(stage: s, userId: app.meta.userId),
           _LogTab(logs: app.logs),   // ← provider 누적 로그 전달
         ],
@@ -225,19 +226,19 @@ class _DashboardTab extends StatelessWidget {
 
 // ─── 압력 분포 탭 ─────────────────────────────────────────────
 class _PressureTab extends StatelessWidget {
-  final RealtimeStatusModel? status;
-  const _PressureTab({required this.status});
+  final SensorDistributionModel? distribution;
+  const _PressureTab({required this.distribution});
 
   @override
   Widget build(BuildContext context) {
-    if (status == null) {
+    if (distribution == null) {
       return const Center(
-          child: Text('데이터 수신 중...',
+          child: Text('센서 데이터 수신 중...',
               style: TextStyle(color: Colors.white54)));
     }
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
-      child: ChairSensorWidget(status: status!),
+      child: ChairSensorWidget(distribution: distribution),
     );
   }
 }
@@ -253,10 +254,10 @@ class _ProtocolTab extends StatelessWidget {
     final rows = [
       _ProtoRow(k: 'stage', v: stage),
       _ProtoRow(k: 'user_id', v: userId ?? '-'),
-      _ProtoRow(k: 'connection', v: 'HTTP Polling'),
-      _ProtoRow(k: 'meta_interval', v: '800ms'),
-      _ProtoRow(k: 'status_interval', v: '500ms'),
-      _ProtoRow(k: 'report_interval', v: '2000ms'),
+      _ProtoRow(k: 'connection', v: 'WebSocket'),
+      _ProtoRow(k: 'command', v: 'HTTP POST /command'),
+      _ProtoRow(k: 'ws_endpoint', v: 'ws://<IP>:8000/ws'),
+      _ProtoRow(k: 'payload_types', v: '6종 (meta, status, ...)'),
     ];
     return ListView(
       padding: const EdgeInsets.all(16),

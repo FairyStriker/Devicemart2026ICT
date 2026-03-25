@@ -15,10 +15,10 @@ class MinuteSummary {
 
   factory MinuteSummary.fromJson(Map<String, dynamic> json) {
     return MinuteSummary(
-      minuteIndex: json['minute_index'] ?? 0,
-      avgScore: (json['avg_score'] ?? 0).toDouble(),
-      dominantPosture: json['dominant_posture'] ?? 'normal',
-      dominantPostureRatio: (json['dominant_posture_ratio'] ?? 0).toDouble(),
+      minuteIndex:         json['minute_index'] ?? 0,
+      avgScore:            (json['avg_score'] ?? 0).toDouble(),
+      dominantPosture:     json['dominant_posture'] ?? 'normal',
+      dominantPostureRatio:(json['dominant_posture_ratio'] ?? 0).toDouble(),
     );
   }
 }
@@ -44,11 +44,11 @@ class OverallSummary {
       (k, v) => MapEntry(k, (v as num).toDouble()),
     );
     return OverallSummary(
-      avgScore: (json['avg_score'] ?? 0).toDouble(),
-      totalSittingSec: (json['total_sitting_sec'] ?? 0).toDouble(),
-      dominantPosture: json['dominant_posture'] ?? 'normal',
-      dominantPostureRatio: (json['dominant_posture_ratio'] ?? 0).toDouble(),
-      postureDurationSec: durations,
+      avgScore:            (json['avg_score'] ?? 0).toDouble(),
+      totalSittingSec:     (json['total_sitting_sec'] ?? 0).toDouble(),
+      dominantPosture:     json['dominant_posture'] ?? 'normal',
+      dominantPostureRatio:(json['dominant_posture_ratio'] ?? 0).toDouble(),
+      postureDurationSec:  durations,
     );
   }
 }
@@ -69,10 +69,32 @@ class StandEvent {
   factory StandEvent.fromJson(Map<String, dynamic> json) {
     final actions = json['actions'] ?? {};
     return StandEvent(
-      userId: json['user_id'] ?? '',
-      message: json['message'] ?? '사용자가 자리에서 일어났습니다.',
+      userId:       json['user_id'] ?? '',
+      message:      json['message'] ?? '사용자가 자리에서 일어났습니다.',
       resumeAction: actions['resume'] ?? 'resume_after_stand',
-      stopAction: actions['stop'] ?? 'decline_resume_after_stand',
+      stopAction:   actions['stop'] ?? 'decline_resume_after_stand',
+    );
+  }
+}
+
+/// RPi report_service.build_enhanced_report 결과
+/// 서버가 보내는 enhanced_report payload를 그대로 저장
+class EnhancedReport {
+  final String userId;
+  final String sessionId;
+  final Map<String, dynamic> data;
+
+  EnhancedReport({
+    required this.userId,
+    required this.sessionId,
+    required this.data,
+  });
+
+  factory EnhancedReport.fromJson(Map<String, dynamic> json) {
+    return EnhancedReport(
+      userId:    json['user_id'] ?? '',
+      sessionId: json['session_id']?.toString() ?? '',
+      data:      json['data'] as Map<String, dynamic>? ?? {},
     );
   }
 }
