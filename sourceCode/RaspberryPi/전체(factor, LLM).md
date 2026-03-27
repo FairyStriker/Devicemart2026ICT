@@ -293,11 +293,11 @@ finally:
 ⸻
 
 ✅ 지금 작업 우선순위
-	1.	report_service.py에 llm 분기 추가
-	2.	report_llm_service.py를 실제 llama.cpp 호출 구조로 교체
-	3.	settings.py의 LLM 설정 정리
-	4.	factor 값은 지금 당장 확정하지 말고 scaffold 유지
-	5.	부저는 전체 시스템이 안정된 뒤 POSTURE_BUZZER_ENABLE=1로 단계적 재활성화
+1. report_service.py에 llm 분기 추가
+2. report_llm_service.py를 실제 llama.cpp 호출 구조로 교체
+3. settings.py의 LLM 설정 정리
+4. factor 값은 지금 당장 확정하지 말고 scaffold 유지
+5. 부저는 전체 시스템이 안정된 뒤 POSTURE_BUZZER_ENABLE=1로 단계적 재활성화
 
 ⸻
 
