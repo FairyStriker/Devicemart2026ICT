@@ -1,3 +1,10 @@
+"""
+Binary sensor packet parser.
+
+128-byte UART payload를 unpack하여
+loadcell / ToF / MPU 구조의 dict로 변환한다.
+"""
+
 import struct
 import time
 
@@ -12,7 +19,7 @@ from src.communication.uart_protocol import (
 def parse_sensor_packet(data_packet: bytes):
     """
     data_packet must be exactly 128 bytes
-    format: <4s 12i 4H 32H 2h
+    format: <4s 12i 32H 4H 2h
     """
     expected_size = struct.calcsize(UNPACK_FORMAT)
     if expected_size != SENSOR_PACKET_DATA_SIZE:
@@ -35,8 +42,8 @@ def parse_sensor_packet(data_packet: bytes):
     frame_type = header.decode("ascii").rstrip(":")
 
     loadcell = list(unpacked[1:13])
-    tof_1d = list(unpacked[13:17])
-    tof_3d = list(unpacked[17:49])
+    tof_3d = list(unpacked[13:45])
+    tof_1d = list(unpacked[45:49])
     mpu = list(unpacked[49:51])
 
     return {

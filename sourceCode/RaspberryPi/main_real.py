@@ -1,7 +1,9 @@
 import os
+import time
 
 from src.sensor.sensor_receiver import SensorReceiver
 
+from src.app_flow.calibration_flow import run_calibration_flow
 from src.app_flow.sit_detector import wait_until_sit_detected
 from src.app_flow.app_flow_controller import (
     wait_for_app_profile_command,
@@ -23,6 +25,7 @@ from src.storage.sample_logger import SampleLogger
 from src.feedback.audio_feedback import AudioFeedback
 
 from src.report.report_generator import ReportGenerator
+from src.report.report_service import ReportService
 
 from src.communication.command_sender import CommandSender
 from src.communication.wifi_server import WiFiServer
@@ -31,12 +34,21 @@ from src.communication.uart_protocol import (
     MSG_READY,
     MSG_LINK_OK,
 )
-
-from src.app_flow.calibration_flow import run_calibration_flow
-from src.runtime.measurement_runtime import run_measurement_loop
 from src.communication.app_payload_builder import (
     build_minute_summary_payload,
     build_overall_summary_payload,
+)
+
+from src.runtime.measurement_runtime import run_measurement_loop
+
+from src.config.settings import (
+    UART_PORT,
+    UART_BAUD,
+    UART_MOCK_MODE,
+    SAMPLE_RATE_HZ,
+    ENABLE_SAMPLE_LOGGER,
+    HANDSHAKE_AFTER_READY_DELAY_SEC,
+    SIT_TO_NEXT_CMD_DELAY_SEC,
 )
 
 
@@ -63,12 +75,26 @@ def finalize_and_save_session(
     total_sitting_sec = latest_state["total_sitting_sec"] if latest_state else 0
     posture_duration_sec = latest_state["posture_duration_sec"] if latest_state else {}
 
+    print("\n=== Posture Duration Sec ===")
+    print(posture_duration_sec)
+    print(f"total_sitting_sec={total_sitting_sec}")
+    print(f"sum_posture_duration={round(sum(posture_duration_sec.values()), 2) if posture_duration_sec else 0}")
+
     overall_summary = report_gen.build_overall_summary(
         total_sitting_sec=total_sitting_sec,
         posture_duration_sec=posture_duration_sec,
     )
 
     minute_summary = report_gen.build_minute_summary()
+
+    report_service = ReportService()
+    enhanced_report = report_service.build_enhanced_report(
+        overall_summary=overall_summary,
+        minute_summary=minute_summary,
+    )
+
+    print("\n=== Enhanced Report ===")
+    print(enhanced_report)
 
     print("\n=== Overall Summary ===")
     print(overall_summary)
@@ -87,12 +113,20 @@ def finalize_and_save_session(
 
     db_manager.save_minute_reports(session_id, minute_summary)
     db_manager.save_daily_report(current_profile["user_id"], overall_summary)
+    db_manager.save_enhanced_report(session_id, enhanced_report)
 
     overall_payload = build_overall_summary_payload(
         user_id=current_profile["user_id"],
         session_id=session_id,
         summary=overall_summary,
     )
+    app_server.update_report({
+        "type": "enhanced_report",
+        "user_id": current_profile["user_id"],
+        "session_id": session_id,
+        "data": enhanced_report,
+    })
+
     app_server.update_report(overall_payload)
 
     for item in minute_summary:
@@ -110,11 +144,57 @@ def finalize_and_save_session(
 
     print(f"\n세션 저장 완료: session_id={session_id}, end_reason={end_reason}")
 
+def run_uart_handshake(receiver, sender, ready_msg, link_ok_msg):
+    print("=== UART Handshake 시작 ===")
+
+    # 1) READY 올 때까지 대기
+    receiver.wait_for_message(ready_msg, verbose=True)
+
+    # 2) READY를 본 뒤 ACK 재시도 + LINK_OK 확인
+    ack_retry = 0
+    max_ack_retry = 20
+
+    while ack_retry < max_ack_retry:
+        ack_retry += 1
+
+        if HANDSHAKE_AFTER_READY_DELAY_SEC > 0:
+            print(f"[UART] READY 수신 후 {HANDSHAKE_AFTER_READY_DELAY_SEC:.3f}s 대기")
+            time.sleep(HANDSHAKE_AFTER_READY_DELAY_SEC)
+
+        # READY 반복 송신으로 RX 버퍼에 남아 있을 수 있는 stale 데이터 정리
+        #try:
+        #    receiver.ser.reset_input_buffer()
+        #    print("[UART] RX buffer flushed before ACK")
+        #except Exception as e:
+        #    print(f"[UART] RX buffer flush skipped: {e}")
+
+        print(f"[UART] ACK 전송 시도 {ack_retry}/{max_ack_retry}")
+        sender.send_ack()
+
+        start_ts = time.time()
+        while time.time() - start_ts < 1.0:
+            msg = receiver.read_control_message()
+            if msg is None:
+                continue
+
+            print(f"[UART] RX: {msg}")
+
+            if msg == link_ok_msg:
+                print("=== UART 연결 완료 ===")
+                return True
+
+            # READY가 또 오면 STM32가 아직 handshake 중인 것으로 보고
+            # 다음 루프에서 ACK 재전송
+            if msg == ready_msg:
+                print("[UART] READY 재수신 -> ACK 재전송 예정")
+                break
+
+    raise RuntimeError("UART handshake failed: LINK_OK not received")
 
 def main():
-    uart_port = os.getenv("POSTURE_UART_PORT", "/dev/ttyAMA0")
-    uart_mock_mode = os.getenv("POSTURE_UART_MOCK", "0") == "1"
-    uart_baud = int(os.getenv("POSTURE_UART_BAUD", "921600"))
+    uart_port = UART_PORT
+    uart_mock_mode = UART_MOCK_MODE
+    uart_baud = UART_BAUD
 
     print(f"[UART] using port: {uart_port}")
     print(f"[UART] mock mode: {uart_mock_mode}")
@@ -136,12 +216,12 @@ def main():
 
     profile_manager = ProfileManager()
     session_manager = SessionManager(profile_manager)
-    calibration_manager = CalibrationManager(sample_rate_hz=50)
+    calibration_manager = CalibrationManager(sample_rate_hz=SAMPLE_RATE_HZ)
     db_manager = DatabaseManager()
-    sample_logger = SampleLogger(enabled=True)
+    sample_logger = SampleLogger(enabled=ENABLE_SAMPLE_LOGGER)
 
     classifier = PostureClassifier()
-    score_engine = PostureScoreEngine(sample_rate_hz=50)
+    score_engine = PostureScoreEngine(sample_rate_hz=SAMPLE_RATE_HZ)
     audio = AudioFeedback()
     report_gen = ReportGenerator()
 
@@ -153,11 +233,12 @@ def main():
     }
 
     try:
-        print("=== UART Handshake 시작 ===")
-        receiver.wait_for_message(MSG_READY, verbose=True)
-        sender.send_ack()
-        receiver.wait_for_message(MSG_LINK_OK, verbose=True)
-        print("=== UART 연결 완료 ===")
+        run_uart_handshake(
+            receiver=receiver,
+            sender=sender,
+            ready_msg=MSG_READY,
+            link_ok_msg=MSG_LINK_OK,
+        )
 
         app_server.update_meta({
             "stage": S.UART_LINK_READY,
@@ -167,6 +248,7 @@ def main():
             app_server=app_server,
             session_manager=session_manager,
             db_manager=db_manager,
+            sender=sender,
         )
 
         session_manager.start_session()
@@ -187,6 +269,7 @@ def main():
                 app_server=app_server,
                 session_manager=session_manager,
                 db_manager=db_manager,
+                sender=sender,
             )
 
         if decision == "start_calibration":
@@ -211,6 +294,7 @@ def main():
             app_server=app_server,
             session_manager=session_manager,
             db_manager=db_manager,
+            sender=sender,
         )
 
         if decision == "cancel":
@@ -228,6 +312,10 @@ def main():
 
         wait_until_sit_detected(receiver, sender)
 
+        if SIT_TO_NEXT_CMD_DELAY_SEC > 0:
+            print(f"[RPi] SIT 확인 후 {SIT_TO_NEXT_CMD_DELAY_SEC:.3f}s 대기")
+            time.sleep(SIT_TO_NEXT_CMD_DELAY_SEC)
+
         print("측정 시작 명령 전송")
         sender.send_go()
         session_manager.mark_measurement_started()
@@ -238,6 +326,9 @@ def main():
 
         current_profile = session_manager.get_current_profile()
         baseline = session_manager.get_current_baseline()
+
+        print(f"[DB CHECK] creating session for user_id={current_profile['user_id']}")
+
         session_id = db_manager.create_session(current_profile["user_id"])
 
         sample_logger.start_session_log(
@@ -275,6 +366,7 @@ def main():
                     app_server=app_server,
                     session_manager=session_manager,
                     db_manager=db_manager,
+                    sender=sender,
                 )
 
                 if decision == "resume":
@@ -283,6 +375,11 @@ def main():
                         "stage": S.WAIT_SIT_FOR_MEASURE,
                     })
                     wait_until_sit_detected(receiver, sender)
+
+                    if SIT_TO_NEXT_CMD_DELAY_SEC > 0:
+                        print(f"[RPi] SIT 확인 후 {SIT_TO_NEXT_CMD_DELAY_SEC:.3f}s 대기")
+                        time.sleep(SIT_TO_NEXT_CMD_DELAY_SEC)
+
                     sender.send_go()
 
                     baseline = session_manager.get_current_baseline()
@@ -309,6 +406,7 @@ def main():
                         app_server=app_server,
                         session_manager=session_manager,
                         db_manager=db_manager,
+                        sender=sender,
                     )
 
                     if decision == "cancel":
@@ -323,6 +421,11 @@ def main():
                     })
 
                     wait_until_sit_detected(receiver, sender)
+
+                    if SIT_TO_NEXT_CMD_DELAY_SEC > 0:
+                        print(f"[RPi] SIT 확인 후 {SIT_TO_NEXT_CMD_DELAY_SEC:.3f}s 대기")
+                        time.sleep(SIT_TO_NEXT_CMD_DELAY_SEC)
+
                     sender.send_go()
 
                     baseline = session_manager.get_current_baseline()

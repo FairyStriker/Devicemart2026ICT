@@ -411,7 +411,6 @@ RPi에서는 이 128 byte data를 Python struct.unpack을 사용하여 파싱한
 | 3 | uint16 | 32 | 3D ToF grid values |
 | 4 | int16 | 2 | IMU tilt / orientation values |
 
-
 ## Detatiled Field Description
 
 ### Header
@@ -429,7 +428,6 @@ CAL:
 | ------ | ------ |
 | DAT: | 실시간 측정 데이터 |
 | CAL: | 캘리브레이션 데이터 |
-
 
 ### Loadcell Data(12 x int32)
 
@@ -457,7 +455,6 @@ RPi에서는 다음 용도로 사용한다.
 | 10 | 좌판 후방 좌 |
 | 11 | 좌판 전방 좌 |
 
-
 ### Spine ToF(4 x uint16)
 
 등판에 설치된 ToF 센서 요약 값
@@ -469,7 +466,6 @@ RPi에서는 다음 용도로 사용한다.
 | 15 | 등판 중단 |
 | 16 | 등판 하단 |
 | 17 | 등판 추가 센서 |
-
 
 용도
 - 척추 곡률 변화 감지
@@ -492,7 +488,6 @@ RPi에서는 다음 용도로 사용한다.
 | 12 | 헤드레스트 우측 |
 | 13 | 헤드레스트 좌측 |
 
-
 ### IMU Data(2 x int16)
 
 MPU6050 기반 기울기 값
@@ -500,7 +495,6 @@ MPU6050 기반 기울기 값
 | ------ | ------ |
 | tilt_x | 좌우 기울기 |
 | tilt_y | 전후 기울기 |
-
 
 RPi에서는 다음 용도로 사용
 - 상체 기울기 분석
