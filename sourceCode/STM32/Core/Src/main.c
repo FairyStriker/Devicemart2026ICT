@@ -310,7 +310,7 @@ handshake_done:
       int32_t current_raw[12]={0,}; HX711_ReadAll_Blocking(current_raw);
       int32_t seat_weight_sum=0;
       for(int i=8;i<12;i++) seat_weight_sum+=(current_raw[i]-hx711_offset[i]);
-      if(seat_weight_sum>50000){
+      if(seat_weight_sum>225000){
         is_seated=1;
         HAL_UART_Transmit(&huart1,(uint8_t*)"SIT\n",4,100);
         OLED_Line(0,"SIT detected"); OLED_Show();
@@ -388,7 +388,7 @@ handshake_done:
           }
         }else for(int i=8;i<=11;i++) seat_sum+=pkt.hx711[i];
 
-        if(seat_sum<50000){
+        if(seat_sum<225000){
           empty_count++;
           if(empty_count>=250){
             HAL_UART_Transmit(&huart1,(uint8_t*)"STAND\n",6,10);
