@@ -8,22 +8,22 @@
 	ON: POSTURE_BUZZER_ENABLE=1 python main_real.py
 
 # 📌 현재 시스템 개요
-	•	STM32
-	•	센서 데이터 수집
-	•	Loadcell 12ch
-	•	ToF 3D 32ch
-	•	ToF 1D 4ch
-	•	MPU 2ch
-	•	UART로 Raspberry Pi에 바이너리 패킷 전송
-	•	Raspberry Pi
-	•	UART 수신
-	•	packet parsing / checksum 검증
-	•	feature extraction
-	•	posture classification
-	•	score 계산
-	•	SQLite 저장
-	•	최종 리포트 생성
-	•	모바일 앱과 통신
+- STM32
+- 센서 데이터 수집
+- Loadcell 12ch
+- ToF 3D 32ch
+- ToF 1D 4ch
+- MPU 2ch
+- UART로 Raspberry Pi에 바이너리 패킷 전송
+- Raspberry Pi
+- UART 수신
+- packet parsing / checksum 검증
+- feature extraction
+- posture classification
+- score 계산
+- SQLite 저장
+- 최종 리포트 생성
+- 모바일 앱과 통신
 
 ⸻
 
@@ -61,9 +61,9 @@ posture_ai/
 ## 1. factor 구조 선반영 완료
 
 아래 작업은 이미 반영된 상태다.
-	•	src/core/sensor_factor.py 생성 완료
-	•	src/config/settings.py에 factor 관련 설정 추가 완료
-	•	src/runtime/measurement_runtime.py에 factor 적용 연결 완료
+- src/core/sensor_factor.py 생성 완료
+- src/config/settings.py에 factor 관련 설정 추가 완료
+- src/runtime/measurement_runtime.py에 factor 적용 연결 완료
 
 즉 현재 구조는 아래 흐름이다.
 ```md
@@ -75,9 +75,9 @@ raw_packet 수신
 ```
 
 ## 2. 현재 factor 상태
-	•	지금은 의자가 최종 완성 전이라 최종 factor 수치 확정 불가
-	•	따라서 현재는 기본값 scaffold 중심
-	•	나중에 최종 실측 후 settings.py의 수치만 교체 예정
+- 지금은 의자가 최종 완성 전이라 최종 factor 수치 확정 불가
+- 따라서 현재는 기본값 scaffold 중심
+- 나중에 최종 실측 후 settings.py의 수치만 교체 예정
 
 ⸻
 
@@ -86,8 +86,8 @@ raw_packet 수신
 목표
 
 세션 종료 후 생성되는:
-	•	overall_summary
-	•	minute_summary
+- overall_summary
+- minute_summary
 
 를 기반으로 실제 LLM을 호출해서 자연어 리포트를 생성하는 구조로 연결
 
@@ -99,8 +99,8 @@ raw_packet 수신
 
 현재는 rule 기반 enhancer 중심 구조다.
 해야 할 일:
-	•	REPORT_ENGINE == "llm" 분기 추가
-	•	ReportLLMService 연결
+- REPORT_ENGINE == "llm" 분기 추가
+- ReportLLMService 연결
 
 즉 방향은 아래와 같다.
 ```md
@@ -114,11 +114,11 @@ if engine == "llm"  → report_llm_service 사용
 
 현재는 mock 수준의 뼈대 파일이다.
 해야 할 일:
-	•	프롬프트 구성
-	•	llama.cpp 호출
-	•	GGUF 모델 경로 사용
-	•	결과 파싱
-	•	최종 반환 형식 통일
+- 프롬프트 구성
+- llama.cpp 호출
+- GGUF 모델 경로 사용
+- 결과 파싱
+- 최종 반환 형식 통일
 
 출력 형식 목표:
 ```json
@@ -134,13 +134,13 @@ if engine == "llm"  → report_llm_service 사용
 ## 3) src/config/settings.py
 
 확인 및 정리할 항목:
-	•	REPORT_ENGINE
-	•	LLM_REPORT_MODE
-	•	LLM_MODEL_BACKEND
-	•	LLM_GGUF_MODEL_PATH
-	•	LLM_CONTEXT_LEN
-	•	LLM_MAX_TOKENS
-	•	LLM_TEMPERATURE
+- REPORT_ENGINE
+- LLM_REPORT_MODE
+- LLM_MODEL_BACKEND
+- LLM_GGUF_MODEL_PATH
+- LLM_CONTEXT_LEN
+- LLM_MAX_TOKENS
+- LLM_TEMPERATURE
 
 ⸻
 
@@ -208,15 +208,15 @@ finally:
 ## 단계 1. settings.py에서 부저 ON
 
 파일:
-	•	src/config/settings.py
+- src/config/settings.py
 
 현재:
 
 `BUZZER_ENABLE = os.getenv("POSTURE_BUZZER_ENABLE", "0") == "1"`
 
 실연동 테스트 시:
-	•	코드 기본값을 "1"로 바꾸거나
-	•	실행 시 환경변수로 POSTURE_BUZZER_ENABLE=1 주입
+- 코드 기본값을 "1"로 바꾸거나
+- 실행 시 환경변수로 POSTURE_BUZZER_ENABLE=1 주입
 
 권장 방식:
 `기본값은 그대로 두고, 실행 시 환경변수로만 ON 하는 것을 추천`
@@ -232,13 +232,13 @@ finally:
 ## 단계 2. measurement_runtime.py의 조건부 buzzer 코드 유지
 
 중요:
-	•	현재 measurement_runtime.py에서 추가한 if buzzer: 가드들은 지우지 말 것
-	•	그 상태 그대로 두고 BUZZER_ENABLE=1일 때만 실제 활성화되게 해야 함
+- 현재 measurement_runtime.py에서 추가한 if buzzer: 가드들은 지우지 말 것
+- 그 상태 그대로 두고 BUZZER_ENABLE=1일 때만 실제 활성화되게 해야 함
 
 즉,
-	•	buzzer = None
-	•	if BUZZER_ENABLE: ...
-	•	if buzzer: ...
+- buzzer = None
+- if BUZZER_ENABLE: ...
+- if buzzer: ...
 
 이 구조는 유지해야 한다.
 
@@ -252,23 +252,23 @@ finally:
 #gpiod; platform_system == "Linux"
 ```
 ### 실부저 테스트 전에 해야 할 일:
-	•	Raspberry Pi 환경에서 gpiod import 가능 여부 확인
-	•	필요한 경우 수동 설치
-	•	buzzer_feedback.py가 현재 사용하는 GPIO 라이브러리 기준으로 정상 import 확인
+- Raspberry Pi 환경에서 gpiod import 가능 여부 확인
+- 필요한 경우 수동 설치
+- buzzer_feedback.py가 현재 사용하는 GPIO 라이브러리 기준으로 정상 import 확인
 
 즉 부저 실험 전 체크 항목:
-	1.	python -c "import gpiod; print('ok')" 또는 현재 사용하는 라이브러리 import 확인
-	2.	buzzer_feedback.py 단독 테스트
-	3.	그 다음 main_real.py 전체 연동 테스트
+1.	python -c "import gpiod; print('ok')" 또는 현재 사용하는 라이브러리 import 확인
+2.	buzzer_feedback.py 단독 테스트
+3.	그 다음 main_real.py 전체 연동 테스트
 
 ⸻
 
 ## 단계 4. buzzer_feedback.py 단독 테스트 후 전체 연동
 
 권장 순서:
-	1.	buzzer_feedback.py 단독 테스트
-	2.	GPIO line on/off 확인
-	3.	그 다음 main_real.py에 POSTURE_BUZZER_ENABLE=1로 연동 테스트
+1.	buzzer_feedback.py 단독 테스트
+2.	GPIO line on/off 확인
+3.	그 다음 main_real.py에 POSTURE_BUZZER_ENABLE=1로 연동 테스트
 
 즉 바로 전체 시스템으로 가지 말고, 부저 모듈 단독 → 전체 연동 순서로 확인
 
@@ -277,18 +277,18 @@ finally:
 # 📌 factor 관련 현재 판단
 
 지금 가능한 것
-	•	factor 적용 구조는 이미 완료
-	•	일부 센서 값으로 초안 factor 실험 가능
-	•	scaffold 상태로 유지 가능
+- factor 적용 구조는 이미 완료
+- 일부 센서 값으로 초안 factor 실험 가능
+- scaffold 상태로 유지 가능
 
 아직 어려운 것
-	•	최종 factor 수치 확정
-	•	이유: 의자가 아직 완성 전이라 최종 장착 위치/하중 분산/거리 배치가 고정되지 않음
+- 최종 factor 수치 확정
+- 이유: 의자가 아직 완성 전이라 최종 장착 위치/하중 분산/거리 배치가 고정되지 않음
 
 따라서 현재 전략
-	•	구조는 유지
-	•	값은 임시값
-	•	최종 factor는 의자 완성 후 settings.py 숫자만 교체
+- 구조는 유지
+- 값은 임시값
+- 최종 factor는 의자 완성 후 settings.py 숫자만 교체
 
 ⸻
 
