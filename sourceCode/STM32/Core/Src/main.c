@@ -384,13 +384,20 @@ handshake_done:
           }else pkt.mpu[i]=0;
         }
 
-        int32_t raw[12]={0,},seat_sum=0,seat_raw_sum=0;
-        if(HX711_ReadAll_Raw(raw)){
-          for(int i=0;i<12;i++){
-            pkt.hx711[i]=raw[i]-hx711_offset[i];
-            if(i>=8&&i<=11){ seat_sum+=pkt.hx711[i]; seat_raw_sum+=raw[i]; }
+        /* HX711 10SPS: 110ms 간격으로 Blocking 읽기하여 12채널 동기화.
+           나머지 프레임은 이전 값을 재사용하므로 50Hz 루프 유지. */
+        int32_t seat_sum=0,seat_raw_sum=0;
+        { static uint32_t last_hx_time=0;
+          if(HAL_GetTick()-last_hx_time>=110){
+            int32_t raw[12]={0,};
+            HX711_ReadAll_Blocking(raw);
+            for(int i=0;i<12;i++){
+              pkt.hx711[i]=raw[i]-hx711_offset[i];
+            }
+            last_hx_time=HAL_GetTick();
           }
-        }else for(int i=8;i<=11;i++) seat_sum+=pkt.hx711[i];
+        }
+        for(int i=8;i<=11;i++){ seat_sum+=pkt.hx711[i]; }
 
         if(seat_sum<225000){
           empty_count++;
