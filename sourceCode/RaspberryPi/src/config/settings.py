@@ -31,7 +31,7 @@ DEBUG_FLAGS = os.getenv("POSTURE_DEBUG_FLAGS", "0") == "1"
 DEBUG_SENSOR_RAW = os.getenv("POSTURE_DEBUG_SENSOR_RAW", "0") == "1"
 DEBUG_SUMMARY_EVERY_N = max(1, int(os.getenv("POSTURE_DEBUG_SUMMARY_EVERY_N", "50")))
 ENABLE_SAMPLE_LOGGER = os.getenv("POSTURE_ENABLE_SAMPLE_LOGGER", "1") == "1"
-
+DEBUG_SENSOR_DISTRIBUTION = os.getenv("POSTURE_DEBUG_SENSOR_DIST", "0") == "1"
 
 # -----------------------------
 # Report / Future extension
@@ -101,21 +101,6 @@ BUZZER_WEIGHT_MAP = {
 
 FACTOR_ENABLE = os.getenv("POSTURE_FACTOR_ENABLE", "1") == "1"
 
-LOADCELL_FACTORS = {
-    "back_right_top": 1.0,
-    "back_right_upper_mid": 1.0,
-    "back_right_lower_mid": 1.0,
-    "back_right_bottom": 1.0,
-    "back_left_top": 1.0,
-    "back_left_upper_mid": 1.0,
-    "back_left_lower_mid": 1.0,
-    "back_left_bottom": 1.0,
-    "seat_rear_right": 1.0,
-    "seat_front_right": 1.0,
-    "seat_rear_left": 1.0,
-    "seat_front_left": 1.0,
-}
-
 TOF_1D_FACTORS = {
     "spine_upper": 1.0,
     "spine_upper_mid": 1.0,
@@ -126,4 +111,58 @@ TOF_1D_FACTORS = {
 TOF_3D_FACTORS = {
     "left_sensor": 1.0,
     "right_sensor": 1.0,
+}
+
+# -----------------------------
+# Loadcell Calibration Settings
+# -----------------------------
+LOADCELL_CALIBRATION = {
+    "back_right_top": {
+        "offset": -37382,
+        "count_per_kg": 26494.80,
+    },
+    "back_right_upper_mid": {
+        "offset": 382921,
+        "count_per_kg": 17730.19,
+    },
+    "back_right_lower_mid": {
+        "offset": -49580,
+        "count_per_kg": 28652.59,
+    },
+    "back_right_bottom": {
+        "offset": -381543,
+        "count_per_kg": 37188.80,
+    },
+    "back_left_top": {
+        "offset": 579756,
+        "count_per_kg": 19373.19,
+    },
+    "back_left_upper_mid": {
+        "offset": 212781,
+        "count_per_kg": 25634.00,
+    },
+    "back_left_lower_mid": {
+        "offset": -437696,
+        "count_per_kg": 21877.00,
+    },
+    "back_left_bottom": {
+        "offset": 14766,
+        "count_per_kg": 16290.20,
+    },
+    "seat_rear_right": {
+        "offset": 145829,
+        "count_per_kg": 45788.60,
+    },
+    "seat_front_right": {
+        "offset": 1207776,
+        "count_per_kg": 45302.19,
+    },
+    "seat_rear_left": {
+        "offset": 470425,
+        "count_per_kg": 46565.19,
+    },
+    "seat_front_left": {
+        "offset": 145837,
+        "count_per_kg": 47868.19,
+    },
 }
