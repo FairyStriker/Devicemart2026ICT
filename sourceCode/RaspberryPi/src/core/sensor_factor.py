@@ -19,24 +19,24 @@ LOADCELL_ORDER = [
 ]
 
 
-def convert_loadcell_to_kg(raw_value, offset, count_per_kg, noise_floor_kg=0.05):
+def convert_loadcell_to_kg(raw_value, count_per_kg, noise_floor_kg=0.05):
     """
-    raw HX711 ADC 값을 kg 단위로 변환한다.
+    STM32에서 이미 tare(offset 차감)된 HX711 값을 kg 단위로 변환한다.
 
-    - offset: 무하중 시 센서 출력값 (tare)
-    - count_per_kg: ADC count / kg 비율 (5kg 캘리브레이션에서 산출)
+    STM32가 부팅 시 HX711_Init()에서 무하중 offset을 측정하고,
+    매 샘플마다 (raw - hx711_offset) 값을 전송하므로,
+    RPi에서는 추가 offset 차감 없이 count_per_kg로 나누기만 하면 된다.
+
+    - raw_value: STM32에서 수신한 값 (이미 tare 완료)
+    - count_per_kg: ADC count / kg 비율
     - noise_floor_kg: 이 값 미만은 노이즈로 간주하여 0 처리
-
-    변환 공식: weight_kg = (raw_value - offset) / count_per_kg
-    음수(압축 방향 역전 등)는 0으로 clamp하여 비정상 값 방지.
     """
     if not count_per_kg:
         return 0.0
 
-    delta = raw_value - offset
-    weight_kg = delta / count_per_kg
+    weight_kg = raw_value / count_per_kg
 
-    # 음수는 센서 장착 방향 역전 또는 offset 오차 — 0으로 clamp
+    # 음수는 센서 노이즈 또는 잔여 오차 — 0으로 clamp
     if weight_kg < noise_floor_kg:
         return 0.0
 
@@ -62,11 +62,9 @@ def apply_sensor_factors(raw_packet: dict) -> dict:
             if idx < len(LOADCELL_ORDER):
                 key = LOADCELL_ORDER[idx]
                 calib = LOADCELL_CALIBRATION.get(key, {})
-                offset = calib.get("offset", 0)
                 count_per_kg = calib.get("count_per_kg", 1.0)
                 converted = convert_loadcell_to_kg(
                     raw_value=value,
-                    offset=offset,
                     count_per_kg=count_per_kg,
                 )
             else:
