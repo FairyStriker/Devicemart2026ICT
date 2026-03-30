@@ -229,10 +229,14 @@ def run_measurement_loop(
             if raw_packet is None:
                 continue
 
-            # 첫 5샘플만 loadcell 변환 디버그 출력
-            _lc_debug = (sample_index < 5)
+            # 매 50샘플마다 loadcell 원본값 디버그 출력
+            _dat_count = runtime_context.get("_dat_debug_count", 0)
+            _lc_debug = (_dat_count % 50 == 0)
             if _lc_debug:
-                print(f"[LOADCELL DEBUG] sample={sample_index}")
+                raw_lc = raw_packet.get("loadcell", [])
+                print(f"[LOADCELL RAW] dat#{_dat_count} stm32_raw={raw_lc}")
+            runtime_context["_dat_debug_count"] = _dat_count + 1
+
             raw_packet = apply_sensor_factors(raw_packet, debug=_lc_debug)
 
             if (
