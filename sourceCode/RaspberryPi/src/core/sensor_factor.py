@@ -19,11 +19,24 @@ LOADCELL_ORDER = [
 ]
 
 
-def convert_loadcell_to_kg(raw_value, offset, count_per_kg, noise_floor_kg=0.2):
-    delta = raw_value - offset
-    magnitude = abs(delta)
-    weight_kg = magnitude / count_per_kg if count_per_kg else 0.0
+def convert_loadcell_to_kg(raw_value, offset, count_per_kg, noise_floor_kg=0.05):
+    """
+    raw HX711 ADC 값을 kg 단위로 변환한다.
 
+    - offset: 무하중 시 센서 출력값 (tare)
+    - count_per_kg: ADC count / kg 비율 (5kg 캘리브레이션에서 산출)
+    - noise_floor_kg: 이 값 미만은 노이즈로 간주하여 0 처리
+
+    변환 공식: weight_kg = (raw_value - offset) / count_per_kg
+    음수(압축 방향 역전 등)는 0으로 clamp하여 비정상 값 방지.
+    """
+    if not count_per_kg:
+        return 0.0
+
+    delta = raw_value - offset
+    weight_kg = delta / count_per_kg
+
+    # 음수는 센서 장착 방향 역전 또는 offset 오차 — 0으로 clamp
     if weight_kg < noise_floor_kg:
         return 0.0
 

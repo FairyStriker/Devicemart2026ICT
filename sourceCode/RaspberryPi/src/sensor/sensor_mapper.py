@@ -114,7 +114,8 @@ def _sanitize_spine_value(key, value):
         if prev is not None and _SPINE_INVALID_STREAK[key] <= MAX_INVALID_HOLD_FRAMES:
             smoothed = prev
         else:
-            smoothed = 0.0
+            # 데드존 진입 시 0.0 대신 최소 유효값으로 고정 (점수 급락 방지)
+            smoothed = float(SPINE_VALID_MIN_MM)
 
     _PREV_SPINE[key] = smoothed
     return round(smoothed, 3)
@@ -147,6 +148,9 @@ def _build_head_summary(tof_3d):
         else None
     )
 
+    # 데드존 진입 시 0.0 대신 최소 유효값으로 고정 (점수 급락 방지)
+    _head_floor = float(HEAD_VALID_MIN_MM)
+
     # RIGHT
     prev_r = _PREV_HEAD["right_mean"]
     if raw_right_mean is not None:
@@ -159,7 +163,7 @@ def _build_head_summary(tof_3d):
         if prev_r is not None and _HEAD_INVALID_STREAK["right"] <= MAX_INVALID_HOLD_FRAMES:
             right_mean = prev_r
         else:
-            right_mean = 0.0
+            right_mean = _head_floor
 
     # LEFT
     prev_l = _PREV_HEAD["left_mean"]
@@ -173,7 +177,7 @@ def _build_head_summary(tof_3d):
         if prev_l is not None and _HEAD_INVALID_STREAK["left"] <= MAX_INVALID_HOLD_FRAMES:
             left_mean = prev_l
         else:
-            left_mean = 0.0
+            left_mean = _head_floor
 
     # TOTAL
     valid_means = [v for v in [left_mean, right_mean] if v > 0]
@@ -190,7 +194,7 @@ def _build_head_summary(tof_3d):
         if prev_m is not None and _HEAD_INVALID_STREAK["all"] <= MAX_INVALID_HOLD_FRAMES:
             mean_all = prev_m
         else:
-            mean_all = 0.0
+            mean_all = _head_floor
 
     _PREV_HEAD["left_mean"] = left_mean
     _PREV_HEAD["right_mean"] = right_mean
