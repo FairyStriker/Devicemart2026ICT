@@ -215,8 +215,12 @@ void Run_Calibration(void){
         pkt.mpu[i]=(int16_t)(atan2((float)(-ax),(float)az)*(180.0/3.141592));
       }else pkt.mpu[i]=0;
     }
+    /* 캘리브레이션은 정확도 우선이므로 Blocking 읽기 사용.
+       HX711 10SPS 모드에서 ReadAll_Raw는 DOUT ready 타이밍을 놓쳐
+       대부분 실패(return 0)하여 loadcell baseline이 0이 되는 문제 해결. */
     int32_t raw[12]={0,};
-    if(HX711_ReadAll_Raw(raw)) for(int i=0;i<12;i++) pkt.hx711[i]=raw[i]-hx711_offset[i];
+    HX711_ReadAll_Blocking(raw);
+    for(int i=0;i<12;i++) pkt.hx711[i]=raw[i]-hx711_offset[i];
     uint8_t *p=(uint8_t*)&pkt,ck=0;
     for(int k=0;k<sizeof(Main_Packet_t)-1;k++) ck^=p[k];
     pkt.checksum=ck;
