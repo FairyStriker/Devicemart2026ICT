@@ -40,12 +40,9 @@ def run_calibration_flow(
 
     sender.send_cal()
 
-    def mapper_with_factors(raw_pkt):
-        return map_raw_packet(apply_sensor_factors(raw_pkt))
-
     baseline = calibration_manager.run_calibration_loop(
         receiver=receiver,
-        mapper_func=mapper_with_factors,
+        mapper_func=map_raw_packet,
         feature_extractor_func=extract_features,
         duration_sec=10,
         verbose=True,

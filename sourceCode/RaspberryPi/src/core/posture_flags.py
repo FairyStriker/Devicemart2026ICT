@@ -62,9 +62,9 @@ def detect_posture_flags(feature_map, delta_map=None):
     # 2) turtle_neck
     # 절대값보다는 baseline 대비 목 전방 이동 증가를 우선 판단
     if (
-        (neck_mean_delta > 10.0 and neck_forward_delta_delta > 7.0) or
-        (neck_mean_delta > 14.0) or
-        (neck_forward_delta_delta > 9.0 and pitch_fused_deg_delta > 4.0)
+        (neck_mean_delta > 40.0 and neck_forward_delta_delta > 30.0) or
+        (neck_mean_delta > 60.0) or
+        (neck_forward_delta_delta > 40.0 and pitch_fused_deg_delta > 4.0)
     ):
         flags["turtle_neck"] = True
 
@@ -82,8 +82,8 @@ def detect_posture_flags(feature_map, delta_map=None):
     # 4) reclined
     # 뒤로 기대는 자세: baseline 대비 후방 이동 + 음수 pitch 증가 + 등판 접촉 증가
     if (
-        seat_fb_shift_delta < -0.12 and
-        pitch_fused_deg_delta < -3.0 and
+        seat_fb_shift_delta > 0.12 and
+        pitch_fused_deg_delta > 3.0 and
         bt_ratio > 1.10
     ):
         flags["reclined"] = True
@@ -99,7 +99,7 @@ def detect_posture_flags(feature_map, delta_map=None):
     # 6) leg_cross_suspect
     # 좌판 좌우 불균형은 커졌지만, 등판 좌우 불균형은 상대적으로 크지 않은 경우
     if (
-        seat_lr_diff_delta > 0.14 and
+        seat_lr_diff_delta > 0.10 and
         back_lr_diff_delta < 0.10
     ):
         flags["leg_cross_suspect"] = True

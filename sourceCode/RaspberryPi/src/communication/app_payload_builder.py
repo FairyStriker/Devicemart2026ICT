@@ -182,8 +182,12 @@ def _baseline_similarity_percent(current, baseline_val, danger_range):
     return int(_clamp(round(score)))
 
 
-# 로드셀 개별 셀의 baseline 대비 변화 판단용 위험 범위 (kg)
-_LOADCELL_CELL_DANGER_KG = 5.0
+def _sensor_match_percent(current, baseline_val):
+    c, b = abs(current), abs(baseline_val)
+    mx = max(c, b)
+    if mx < 0.5:
+        return 100
+    return int(_clamp(round(min(c, b) / mx * 100)))
 
 
 def build_sensor_distribution_payload(
@@ -236,11 +240,8 @@ def build_sensor_distribution_payload(
         baseline.get("back_right_bottom_kg", 0.0),
     ]
 
-    # baseline 대비 안정도로 percent 계산
-    back_ui_percents = [
-        _baseline_similarity_percent(cur, base, _LOADCELL_CELL_DANGER_KG)
-        for cur, base in zip(back_ui_values, bl_back)
-    ]
+    # baseline 대비 매칭도로 percent 계산
+    back_ui_percents = [_sensor_match_percent(c, b) for c, b in zip(back_ui_values, bl_back)]
 
     seat_rear_right = seat_raw[0] if len(seat_raw) > 0 else 0
     seat_front_right = seat_raw[1] if len(seat_raw) > 1 else 0
@@ -261,8 +262,7 @@ def build_sensor_distribution_payload(
         baseline.get("seat_front_right_kg", 0.0),
     ]
 
-    seat_ui_percents = [
-        _baseline_similarity_percent(cur, base, _LOADCELL_CELL_DANGER_KG)
+    seat_ui_percents = [_sensor_match_percent(c, b)
         for cur, base in zip(seat_ui_values, bl_seat)
     ]
 

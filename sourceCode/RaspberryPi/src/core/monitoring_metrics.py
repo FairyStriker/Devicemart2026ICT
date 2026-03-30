@@ -72,12 +72,12 @@ def build_monitoring_metrics(feature_map, baseline):
 
     # 등판 ToF 안정도
     spine_tof_score = similarity_score(
-        spine_curve, baseline_spine_curve, danger_range=25.0
+        spine_curve, baseline_spine_curve, danger_range=150.0
     )
 
     # 목 ToF 안정도
     neck_tof_score = similarity_score(
-        neck_mean, baseline_neck_mean, danger_range=120.0
+        neck_mean, baseline_neck_mean, danger_range=300.0
     )
 
     return {

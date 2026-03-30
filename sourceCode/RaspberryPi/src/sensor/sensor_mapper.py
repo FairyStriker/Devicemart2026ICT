@@ -26,7 +26,7 @@ from src.communication.uart_protocol import (
 # -----------------------------
 # VALID RANGE
 # -----------------------------
-HEAD_VALID_MIN_MM = 80
+HEAD_VALID_MIN_MM = 30
 HEAD_VALID_MAX_MM = 1200
 
 SPINE_VALID_MIN_MM = 30
