@@ -169,6 +169,23 @@ def build_debug_sensor_payload(user_id, raw_packet, semantic_packet, feature_map
     }
 
 
+def _baseline_similarity_percent(current, baseline_val, danger_range):
+    """
+    baseline 대비 안정도를 0~100%로 반환.
+    current == baseline → 100%, 차이가 danger_range 이상 → 0%.
+    baseline이 0이고 current도 0이면 100% (변화 없음).
+    """
+    delta = abs(current - baseline_val)
+    if danger_range <= 0:
+        return 100 if delta == 0 else 0
+    score = 100 * (1 - delta / danger_range)
+    return int(_clamp(round(score)))
+
+
+# 로드셀 개별 셀의 baseline 대비 변화 판단용 위험 범위 (kg)
+_LOADCELL_CELL_DANGER_KG = 5.0
+
+
 def build_sensor_distribution_payload(
     user_id,
     session_id,
@@ -176,13 +193,16 @@ def build_sensor_distribution_payload(
     raw_packet,
     feature_map,
     semantic_packet=None,
+    baseline=None,
 ):
     """
     앱 대시보드용 상세 센서 분포 payload
     - spine ToF는 semantic_packet의 정제/안정화 값 우선 사용
     - head ToF는 비정상 범위값을 제외하고 요약
+    - loadcell percent는 baseline 대비 안정도 (baseline=None이면 절대값 기준)
     """
     semantic_packet = semantic_packet or {}
+    baseline = baseline or {}
 
     loadcell = raw_packet.get("loadcell", [])
     tof_1d = raw_packet.get("tof_1d", [])
@@ -204,15 +224,23 @@ def build_sensor_distribution_payload(
         back_right[3],
     ]
 
-    back_total_abs = sum(abs(v) for v in back_ui_values)
+    # baseline loadcell 개별 값 가져오기 (캘리브레이션 시 저장된 값)
+    bl_back = [
+        baseline.get("back_left_top_kg", 0.0),
+        baseline.get("back_left_upper_mid_kg", 0.0),
+        baseline.get("back_left_lower_mid_kg", 0.0),
+        baseline.get("back_left_bottom_kg", 0.0),
+        baseline.get("back_right_top_kg", 0.0),
+        baseline.get("back_right_upper_mid_kg", 0.0),
+        baseline.get("back_right_lower_mid_kg", 0.0),
+        baseline.get("back_right_bottom_kg", 0.0),
+    ]
 
-    if back_total_abs > 0:
-        back_ui_percents = [
-            _clamp(int(round((abs(v) / back_total_abs) * 100)))
-            for v in back_ui_values
-        ]
-    else:
-        back_ui_percents = [0] * 8
+    # baseline 대비 안정도로 percent 계산
+    back_ui_percents = [
+        _baseline_similarity_percent(cur, base, _LOADCELL_CELL_DANGER_KG)
+        for cur, base in zip(back_ui_values, bl_back)
+    ]
 
     seat_rear_right = seat_raw[0] if len(seat_raw) > 0 else 0
     seat_front_right = seat_raw[1] if len(seat_raw) > 1 else 0
@@ -226,15 +254,17 @@ def build_sensor_distribution_payload(
         seat_front_right,
     ]
 
-    seat_total_abs = sum(abs(v) for v in seat_ui_values)
+    bl_seat = [
+        baseline.get("seat_rear_left_kg", 0.0),
+        baseline.get("seat_rear_right_kg", 0.0),
+        baseline.get("seat_front_left_kg", 0.0),
+        baseline.get("seat_front_right_kg", 0.0),
+    ]
 
-    if seat_total_abs > 0:
-        seat_ui_percents = [
-            _clamp(int(round((abs(v) / seat_total_abs) * 100)))
-            for v in seat_ui_values
-        ]
-    else:
-        seat_ui_percents = [0, 0, 0, 0]
+    seat_ui_percents = [
+        _baseline_similarity_percent(cur, base, _LOADCELL_CELL_DANGER_KG)
+        for cur, base in zip(seat_ui_values, bl_seat)
+    ]
 
     def tof_mm_to_percent(mm_value):
         try:

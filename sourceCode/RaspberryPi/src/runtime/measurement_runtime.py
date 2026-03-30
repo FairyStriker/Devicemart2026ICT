@@ -472,6 +472,7 @@ def run_measurement_loop(
                 raw_packet=raw_packet,
                 feature_map=feature_map,
                 semantic_packet=semantic_packet,
+                baseline=baseline,
             )
 
             app_server.update_status(distribution_payload)

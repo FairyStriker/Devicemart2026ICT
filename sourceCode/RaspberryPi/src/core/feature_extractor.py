@@ -148,6 +148,19 @@ def extract_features(packet, baseline=None):
         "seat_rear_total": seat_rear_total,
         "back_total": back_right_total + back_left_total,
         "seat_total": seat_right_total + seat_left_total,
+        # 개별 로드셀 kg (baseline 저장 → sensor_distribution percent 계산용)
+        "back_left_top_kg": bl_top,
+        "back_left_upper_mid_kg": bl_um,
+        "back_left_lower_mid_kg": bl_lm,
+        "back_left_bottom_kg": bl_bottom,
+        "back_right_top_kg": br_top,
+        "back_right_upper_mid_kg": br_um,
+        "back_right_lower_mid_kg": br_lm,
+        "back_right_bottom_kg": br_bottom,
+        "seat_rear_left_kg": sl_rear,
+        "seat_rear_right_kg": sr_rear,
+        "seat_front_left_kg": sl_front,
+        "seat_front_right_kg": sr_front,
     }
 
     delta_map = {}
