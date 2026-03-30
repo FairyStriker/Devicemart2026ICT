@@ -183,9 +183,12 @@ def run_measurement_loop(
                         ),
                     })
 
+                    def _mapper_with_factors(raw_pkt):
+                        return map_raw_packet(apply_sensor_factors(raw_pkt))
+
                     new_baseline = calibration_manager.run_calibration_loop(
                         receiver=receiver,
-                        mapper_func=map_raw_packet,
+                        mapper_func=_mapper_with_factors,
                         feature_extractor_func=extract_features,
                         duration_sec=10,
                         verbose=True,

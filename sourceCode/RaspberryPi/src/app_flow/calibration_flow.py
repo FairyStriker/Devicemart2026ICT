@@ -4,6 +4,7 @@ from src.communication import session_state as S
 from src.communication.uart_protocol import MSG_CAL_DONE
 from src.sensor.sensor_mapper import map_raw_packet
 from src.core.feature_extractor import extract_features
+from src.core.sensor_factor import apply_sensor_factors
 from src.app_flow.sit_detector import wait_until_sit_detected
 from src.config.settings import SIT_TO_NEXT_CMD_DELAY_SEC
 
@@ -39,9 +40,12 @@ def run_calibration_flow(
 
     sender.send_cal()
 
+    def mapper_with_factors(raw_pkt):
+        return map_raw_packet(apply_sensor_factors(raw_pkt))
+
     baseline = calibration_manager.run_calibration_loop(
         receiver=receiver,
-        mapper_func=map_raw_packet,
+        mapper_func=mapper_with_factors,
         feature_extractor_func=extract_features,
         duration_sec=10,
         verbose=True,
