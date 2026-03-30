@@ -6,7 +6,7 @@ RPi5 + STM32 기반 스마트 자세 교정 의자의 Android/Web 클라이언�
 ```
 STM32F411 (센서 수집, 50Hz)
     ↓ UART 921600baud
-RPi5 + Hailo-8 (자세 판정, AI 추론)
+RPi5 (자세 판정)
     ↓ WiFi (HTTP + WebSocket)
 Flutter App (시각화, 제어)
 ```
