@@ -39,17 +39,17 @@ DEBUG_SENSOR_DISTRIBUTION = os.getenv("POSTURE_DEBUG_SENSOR_DIST", "0") == "1"
 REPORT_ENGINE = os.getenv("POSTURE_REPORT_ENGINE", "rule")
 LLM_REPORT_MODE = os.getenv("POSTURE_LLM_REPORT_MODE", "mock")
 LLM_MODEL_BACKEND = os.getenv("POSTURE_LLM_MODEL_BACKEND", "llama_cpp")
-LLM_GGUF_MODEL_PATH = os.getenv("POSTURE_LLM_GGUF_MODEL_PATH", "")
+LLM_GGUF_MODEL_PATH = os.getenv("POSTURE_LLM_GGUF_MODEL_PATH", "models/llm/qwen2.5-0.5b-instruct-q4_k_m.gguf")
 LLM_CONTEXT_LEN = int(os.getenv("POSTURE_LLM_CONTEXT_LEN", "2048"))
-LLM_MAX_TOKENS = int(os.getenv("POSTURE_LLM_MAX_TOKENS", "256"))
+LLM_MAX_TOKENS = int(os.getenv("POSTURE_LLM_MAX_TOKENS", "512"))
 LLM_TEMPERATURE = float(os.getenv("POSTURE_LLM_TEMPERATURE", "0.2"))
 # REPORT_ENGINE:
 # - "rule": 기존 rule-based 리포트
-# - "llm" : LLM-ready 리포트 엔진
+# - "llm" : LLM 리포트 엔진 (llama-cpp-python)
 #
 # LLM_REPORT_MODE:
-# - "mock": 실제 LLM 호출 없이 mock LLM 형태로 동작
-# 향후 OpenAI / local LLM 연결 시 여기서 모드 확장 가능
+# - "mock": 실제 LLM 호출 없이 rule-based fallback
+# - "live": llama-cpp-python으로 실제 GGUF 모델 추론
 
 # -----------------------------
 # Classifier behavior
