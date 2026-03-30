@@ -27,6 +27,9 @@ def convert_loadcell_to_kg(raw_value, count_per_kg, noise_floor_kg=0.05):
     매 샘플마다 (raw - hx711_offset) 값을 전송하므로,
     RPi에서는 추가 offset 차감 없이 count_per_kg로 나누기만 하면 된다.
 
+    스트레인 게이지 장착 방향에 따라 하중 시 음수 delta가 나올 수 있으므로
+    abs()로 크기만 사용한다. (offset 제거 후이므로 안전)
+
     - raw_value: STM32에서 수신한 값 (이미 tare 완료)
     - count_per_kg: ADC count / kg 비율
     - noise_floor_kg: 이 값 미만은 노이즈로 간주하여 0 처리
@@ -34,16 +37,15 @@ def convert_loadcell_to_kg(raw_value, count_per_kg, noise_floor_kg=0.05):
     if not count_per_kg:
         return 0.0
 
-    weight_kg = raw_value / count_per_kg
+    weight_kg = abs(raw_value) / count_per_kg
 
-    # 음수는 센서 노이즈 또는 잔여 오차 — 0으로 clamp
     if weight_kg < noise_floor_kg:
         return 0.0
 
     return round(weight_kg, 4)
 
 
-def apply_sensor_factors(raw_packet: dict) -> dict:
+def apply_sensor_factors(raw_packet: dict, debug=False) -> dict:
     """
     raw_packet에 센서 보정을 적용한 새 dict를 반환한다.
 
@@ -67,6 +69,15 @@ def apply_sensor_factors(raw_packet: dict) -> dict:
                     raw_value=value,
                     count_per_kg=count_per_kg,
                 )
+
+                if debug:
+                    print(
+                        f"  [{idx}] {key}: "
+                        f"stm32_raw={value}  "
+                        f"abs={abs(value)}  "
+                        f"count_per_kg={count_per_kg}  "
+                        f"kg={converted}"
+                    )
             else:
                 converted = value
 

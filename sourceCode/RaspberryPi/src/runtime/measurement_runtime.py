@@ -229,7 +229,11 @@ def run_measurement_loop(
             if raw_packet is None:
                 continue
 
-            raw_packet = apply_sensor_factors(raw_packet)
+            # 첫 5샘플만 loadcell 변환 디버그 출력
+            _lc_debug = (sample_index < 5)
+            if _lc_debug:
+                print(f"[LOADCELL DEBUG] sample={sample_index}")
+            raw_packet = apply_sensor_factors(raw_packet, debug=_lc_debug)
 
             if (
                 receiver.checksum_fail_count > 0

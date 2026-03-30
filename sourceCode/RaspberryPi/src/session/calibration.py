@@ -57,7 +57,25 @@ class CalibrationManager:
             if raw_packet.get("frame_type") != "CAL":
                 continue
 
+            # 첫 3개 샘플에서 raw loadcell 값 출력 (디버그용)
+            if verbose and self.collected_count < 3:
+                raw_lc = raw_packet.get("loadcell", [])
+                print(f"[Calibration DEBUG] sample={self.collected_count} "
+                      f"raw_loadcell={raw_lc}")
+
             semantic_packet = mapper_func(raw_packet)
+
+            # 첫 3개 샘플에서 kg 변환 후 loadcell 값 출력 (디버그용)
+            if verbose and self.collected_count < 3:
+                lc = semantic_packet.get("loadcell", {})
+                back_r = lc.get("back_right", {})
+                back_l = lc.get("back_left", {})
+                seat_r = lc.get("seat_right", {})
+                seat_l = lc.get("seat_left", {})
+                print(f"[Calibration DEBUG] sample={self.collected_count} "
+                      f"back_right={back_r} back_left={back_l} "
+                      f"seat_right={seat_r} seat_left={seat_l}")
+
             extracted = feature_extractor_func(semantic_packet, baseline=None)
             feature_map = extracted["feature_map"]
 
