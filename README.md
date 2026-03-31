@@ -33,6 +33,3 @@
 
 # 공모전 링크
 https://www.devicemart.co.kr/board/view?id=award_board&seq=151400
-
-# 보고서 공동 작업 스페이스
-### [Google Docs 공동 작업 스페이스](https://docs.google.com/document/d/1ifovhb-QzDKUg93EMQz9aiXHRbXiD7_8uMTCURaIorA/edit?usp=sharing)
