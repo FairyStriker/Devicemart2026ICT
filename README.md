@@ -426,7 +426,6 @@ python sourceCode/rpisimulator2.py
 | **Stage 1** | Mock 기반 파이프라인 검증 (UART · 분류 · 리포트 · 앱 연동) | ✅ 완료 |
 | **Stage 2** | 실 하드웨어 연동 · 센서 매핑 · feature threshold 보정 | ✅ 완료 |
 | **Stage 3** | 통합 검증 (30분 연속 측정 · 정확도 평가 · LLM 리포트 검증) | ✅ 완료 |
-| **Future** | ML 분류기 도입 (다리 꼬기 / 걸터앉기 정확도 향상) · 모델 경량화 | 📅 예정 |
 
 ---
 
