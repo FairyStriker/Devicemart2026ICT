@@ -1,11 +1,23 @@
+# ─────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────
 __pycache__/
 *.pyc
-# Miscellaneous
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ─────────────────────────────────────────────
+# Misc
+# ─────────────────────────────────────────────
 *.class
 *.log
-*.pyc
 *.swp
 .DS_Store
+Thumbs.db
 .atom/
 .build/
 .buildlog/
@@ -14,34 +26,72 @@ __pycache__/
 .swiftpm/
 migrate_working_dir/
 
-# IntelliJ related
+# ─────────────────────────────────────────────
+# IDE
+# ─────────────────────────────────────────────
 *.iml
 *.ipr
 *.iws
 .idea/
+# .vscode/ — keep launch.json/tasks.json under version control if desired
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# Eclipse / STM32CubeIDE (project metadata can be regenerated)
+# .project
+# .cproject
+# .settings/
 
-# Flutter/Dart/Pub related
+# ─────────────────────────────────────────────
+# Flutter / Dart
+# ─────────────────────────────────────────────
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
 /build/
 /coverage/
-
-# Symbolication related
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
-
-# Android Studio will place build artifacts here
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ─────────────────────────────────────────────
+# STM32 / Embedded build artifacts
+# ─────────────────────────────────────────────
+Debug/
+Release/
+*.elf
+*.bin
+*.hex
+*.map
+*.list
+*.o
+*.d
+
+# ─────────────────────────────────────────────
+# Project runtime artifacts (do not commit user data)
+# ─────────────────────────────────────────────
+# SQLite runtime database (regenerated on startup)
+sourceCode/RaspberryPi/posture_system.db
+sourceCode/RaspberryPi/*.db-journal
+sourceCode/RaspberryPi/*.db-wal
+sourceCode/RaspberryPi/*.db-shm
+
+# CSV sample logs collected at runtime
+sourceCode/RaspberryPi/data/raw/
+sourceCode/RaspberryPi/data/processed/
+sourceCode/RaspberryPi/data/*.csv
+
+# Local user profiles (keep templates only)
+sourceCode/RaspberryPi/profiles/user_*.json
+!sourceCode/RaspberryPi/profiles/user_test.json
+
+# Trained ML models — track via Releases / external storage instead
+# (currently keeping the bundled posture_rf.pkl for reproducibility;
+#  uncomment the next line to exclude future binaries)
+# sourceCode/RaspberryPi/saved_models/*.pkl
+sourceCode/RaspberryPi/saved_models/*.joblib
+sourceCode/RaspberryPi/saved_models/*.h5
